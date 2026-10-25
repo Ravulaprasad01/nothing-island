@@ -3,13 +3,17 @@ package com.codex.nothingisland;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
 import android.os.SystemClock;
 import android.view.View;
+import java.io.IOException;
+import java.io.InputStream;
 
-/** Tiny animated Pokémon companions drawn locally with Canvas; no network or image SDK is used. */
+/** Animated Pokémon companions and a photoreal image-sequence Cocker Spaniel. */
 final class MascotView extends View {
     static final int IDLE = 0;
     static final int SINGING = 1;
@@ -33,10 +37,35 @@ final class MascotView extends View {
     private int mode = IDLE;
     private int variant;
     private int dogBehavior = DOG_IDLE;
+    private Bitmap spanielIdle;
+    private Bitmap spanielSleep;
+    private Bitmap spanielBark;
+    private final Bitmap[] spanielRun = new Bitmap[4];
+    private boolean spanielFramesLoaded;
 
     MascotView(Context context) {
         super(context);
-        setContentDescription(variantName(variant) + " mascot");
+        setContentDescription(variantName(variant) + " mascot. Tap to open the activity card.");
+    }
+
+    private void loadSpanielFrames() {
+        if (spanielFramesLoaded) return;
+        spanielFramesLoaded = true;
+        Context context = getContext();
+        spanielIdle = loadFrame(context, "spaniel/idle.png");
+        spanielSleep = loadFrame(context, "spaniel/sleep.png");
+        spanielBark = loadFrame(context, "spaniel/bark.png");
+        for (int i = 0; i < spanielRun.length; i++) {
+            spanielRun[i] = loadFrame(context, "spaniel/run_" + i + ".png");
+        }
+    }
+
+    private Bitmap loadFrame(Context context, String file) {
+        try (InputStream input = context.getAssets().open(file)) {
+            return BitmapFactory.decodeStream(input);
+        } catch (IOException ignored) {
+            return null;
+        }
     }
 
     void setMode(int next) {
@@ -62,10 +91,13 @@ final class MascotView extends View {
 
     void setVariant(int next) {
         int normalized = Math.max(0, Math.min(3, next));
+        if (normalized == 3) loadSpanielFrames();
         if (variant != normalized) {
             variant = normalized;
             dogBehavior = DOG_IDLE;
-            setContentDescription(variantName(variant) + " mascot");
+            setContentDescription(variant == 3
+                    ? "English Cocker Spaniel. Tap to bark and open the activity card."
+                    : variantName(variant) + " mascot. Tap to open the activity card.");
             invalidate();
         }
     }
@@ -98,7 +130,11 @@ final class MascotView extends View {
         super.onDraw(canvas);
         float size = Math.min(getWidth(), getHeight());
         if (size <= 0f) return;
-        float scale = size / 112f;
+        float density = getResources().getDisplayMetrics().density;
+        float visualSize = size >= 80f * density
+                ? Math.min(size, 96f * density)
+                : Math.min(size, 28f * density);
+        float scale = visualSize / 112f;
         canvas.save();
         canvas.translate(getWidth() / 2f, getHeight() / 2f);
         canvas.scale(scale, scale);
@@ -135,144 +171,38 @@ final class MascotView extends View {
     }
 
     private void drawSpaniel(Canvas canvas, float time) {
+        long now = SystemClock.uptimeMillis();
+        Bitmap frame;
+        float bob = 0f;
+        float breath = 1f;
         if (dogBehavior == DOG_SLEEP) {
-            drawSleepingSpaniel(canvas, time);
-            return;
-        }
-        boolean running = dogBehavior == DOG_RUN;
-        float phase = (float) (time * (running ? Math.PI * 8d : Math.PI * 2d));
-        float bounce = running ? Math.abs((float) Math.sin(phase)) * -5f : (float) Math.sin(phase) * 1f;
-        float wag = (float) Math.sin(time * Math.PI * (running ? 8f : 3f)) * (running ? 20f : 15f);
-        float earSwing = (float) Math.sin(phase) * (running ? 12f : 4f);
-        float headTilt = dogBehavior == DOG_BARK ? (float) Math.sin(time * Math.PI * 8f) * 5f : 0f;
-        canvas.save();
-        canvas.translate(0f, bounce);
-        drawDogTail(canvas, wag, false);
-        drawDogLegs(canvas, phase, running, false);
-        drawDogBody(canvas);
-        drawDogLegs(canvas, phase, running, true);
-        canvas.save();
-        canvas.rotate(headTilt, 25f, -18f);
-        drawDogHead(canvas, time, earSwing, dogBehavior == DOG_BARK);
-        canvas.restore();
-        canvas.restore();
-        if (running) {
-            paint.setColor(Color.argb(170, 245, 245, 245));
-            paint.setStrokeWidth(2f);
-            paint.setStrokeCap(Paint.Cap.ROUND);
-            canvas.drawLine(-47, 12, -57, 12, paint);
-            canvas.drawLine(-44, 20, -53, 20, paint);
-        }
-        if (dogBehavior == DOG_BARK && ((int) (time * 8f) % 2 == 0)) {
-            paint.setColor(Color.rgb(255, 245, 202));
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth(2.5f);
-            canvas.drawArc(new RectF(40, -30, 54, -16), -55, 105, false, paint);
-            canvas.drawArc(new RectF(44, -35, 62, -11), -55, 105, false, paint);
-            paint.setStyle(Paint.Style.FILL);
-        }
-    }
-
-    private void drawDogBody(Canvas c) {
-        paint.setColor(Color.rgb(142, 69, 36));
-        c.drawOval(new RectF(-39, -12, 23, 25), paint);
-        paint.setColor(Color.rgb(190, 105, 55));
-        c.drawOval(new RectF(-34, -15, 18, 19), paint);
-        paint.setColor(Color.rgb(243, 225, 202));
-        Path chest = new Path();
-        chest.moveTo(9, -8); chest.quadTo(23, 0, 15, 21); chest.quadTo(1, 24, -5, 10); chest.close();
-        c.drawPath(chest, paint);
-        // A few short feather marks make the long coat read as a spaniel at icon size.
-        paint.setColor(Color.rgb(222, 153, 98));
-        paint.setStrokeWidth(2.4f); paint.setStrokeCap(Paint.Cap.ROUND);
-        c.drawLine(-27, 12, -32, 18, paint); c.drawLine(-19, 16, -22, 22, paint);
-        c.drawLine(1, 15, -1, 21, paint);
-    }
-
-    private void drawDogTail(Canvas c, float wag, boolean curled) {
-        c.save();
-        c.rotate(curled ? -55f : wag, -35f, -4f);
-        Path tail = new Path(); tail.moveTo(-34, -5); tail.quadTo(-50, -17, -52, -32);
-        paint.setColor(Color.rgb(142, 69, 36)); paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(9); paint.setStrokeCap(Paint.Cap.ROUND); c.drawPath(tail, paint);
-        paint.setColor(Color.rgb(190, 105, 55)); paint.setStrokeWidth(6); c.drawPath(tail, paint);
-        paint.setStyle(Paint.Style.FILL); c.restore();
-    }
-
-    private void drawDogLegs(Canvas c, float phase, boolean running, boolean nearSide) {
-        float offset = nearSide ? .45f : 0f;
-        float swing = running ? (float) Math.sin(phase + offset) * 13f : (float) Math.sin(phase + offset) * 1.3f;
-        int coat = nearSide ? Color.rgb(177, 91, 47) : Color.rgb(143, 69, 37);
-        paint.setColor(coat); paint.setStrokeWidth(7.2f); paint.setStrokeCap(Paint.Cap.ROUND);
-        // Hip and shoulder joints articulate independently to suggest a real running gait.
-        float rearX = -25f + swing;
-        float frontX = 8f - swing;
-        float lift = running ? Math.max(0f, (float) Math.cos(phase + offset)) * 8f : 0f;
-        c.drawLine(-26f, 14f, rearX, 27f - lift, paint);
-        c.drawLine(rearX, 27f - lift, rearX + (running ? -swing * .35f : 1f), 34f, paint);
-        c.drawLine(8f, 12f, frontX, 25f - lift, paint);
-        c.drawLine(frontX, 25f - lift, frontX + (running ? swing * .35f : 1f), 34f, paint);
-        paint.setColor(Color.rgb(238, 217, 191));
-        c.drawOval(new RectF(rearX - 5f, 31f, rearX + 5f, 36f), paint);
-        c.drawOval(new RectF(frontX - 5f, 31f, frontX + 5f, 36f), paint);
-    }
-
-    private void drawDogHead(Canvas c, float time, float earSwing, boolean barking) {
-        paint.setColor(Color.rgb(178, 91, 45));
-        c.drawOval(new RectF(4, -42, 47, 3), paint);
-        // Cream blaze and muzzle.
-        paint.setColor(Color.rgb(246, 230, 210));
-        Path blaze = new Path(); blaze.moveTo(27, -39); blaze.quadTo(33, -22, 27, -8); blaze.quadTo(22, -19, 24, -38); blaze.close(); c.drawPath(blaze, paint);
-        c.drawOval(new RectF(28, -20, 51, -5), paint);
-        // Long feathered ears sway separately from the head.
-        c.save(); c.rotate(-8f + earSwing, 10f, -30f);
-        paint.setColor(Color.rgb(132, 61, 35));
-        Path ear = new Path(); ear.moveTo(13, -34); ear.quadTo(-5, -30, 3, -5); ear.quadTo(9, 6, 19, -4); ear.quadTo(18, -22, 13, -34); ear.close(); c.drawPath(ear, paint);
-        paint.setColor(Color.rgb(196, 112, 64)); c.drawLine(8, -26, 9, -5, paint); c.restore();
-        c.save(); c.rotate(8f - earSwing, 41f, -31f);
-        paint.setColor(Color.rgb(132, 61, 35));
-        Path farEar = new Path(); farEar.moveTo(39, -34); farEar.quadTo(56, -31, 53, -8); farEar.quadTo(49, 2, 40, -5); farEar.quadTo(37, -21, 39, -34); farEar.close(); c.drawPath(farEar, paint);
-        paint.setColor(Color.rgb(196, 112, 64)); c.drawLine(45, -26, 46, -7, paint); c.restore();
-        paint.setColor(Color.rgb(54, 36, 31));
-        boolean blink = !barking && time > .92f;
-        if (blink) {
-            paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(2.5f);
-            c.drawLine(24, -26, 29, -26, paint); c.drawLine(38, -25, 43, -25, paint);
-            paint.setStyle(Paint.Style.FILL);
+            frame = spanielSleep;
+            breath = 1f + (float) Math.sin(time * Math.PI * 2f) * .018f;
+        } else if (dogBehavior == DOG_RUN) {
+            frame = spanielRun[(int) ((now / 105L) % spanielRun.length)];
+            bob = (float) Math.sin(time * Math.PI * 16f) * 1.3f;
+        } else if (dogBehavior == DOG_BARK) {
+            frame = ((now / 300L) % 2L == 0L) ? spanielBark : spanielIdle;
+            bob = (float) Math.sin(time * Math.PI * 8f) * .7f;
         } else {
-            c.drawOval(new RectF(23, -30, 29, -21), paint); c.drawOval(new RectF(37, -29, 43, -20), paint);
-            paint.setColor(Color.WHITE); c.drawCircle(27, -28, 1.4f, paint); c.drawCircle(41, -27, 1.4f, paint);
+            frame = spanielIdle;
+            bob = (float) Math.sin(time * Math.PI * 2f) * .5f;
         }
-        paint.setColor(Color.rgb(43, 34, 32));
-        c.drawOval(new RectF(45, -15, 53, -9), paint);
-        if (barking && ((int) (time * 8f) % 2 == 0)) {
-            paint.setColor(Color.rgb(55, 27, 31)); c.drawOval(new RectF(38, -8, 48, -1), paint);
-            paint.setColor(Color.rgb(235, 111, 121)); c.drawOval(new RectF(41, -4, 46, -1), paint);
-        } else {
-            paint.setColor(Color.rgb(84, 49, 42)); paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(1.7f);
-            c.drawArc(new RectF(39, -11, 49, -2), 15, 145, false, paint); paint.setStyle(Paint.Style.FILL);
+        if (frame == null) return;
+        canvas.save();
+        canvas.translate(0f, bob);
+        canvas.scale(1f, breath, 0f, 18f);
+        RectF target = new RectF(-56f, -56f, 56f, 56f);
+        canvas.drawBitmap(frame, null, target, paint);
+        canvas.restore();
+        if (dogBehavior == DOG_SLEEP) {
+            paint.setColor(Color.rgb(220, 240, 255));
+            paint.setTextSize(12f);
+            paint.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+            float drift = (time * 9f) % 7f;
+            canvas.drawText("Z", 29f + drift, -31f - drift, paint);
+            canvas.drawText("z", 39f + drift, -38f - drift, paint);
         }
-    }
-
-    private void drawSleepingSpaniel(Canvas c, float time) {
-        float breathe = (float) Math.sin(time * Math.PI * 2f) * 1.2f;
-        c.save(); c.translate(0, breathe);
-        // Curled body with tucked paws and head resting against the forelegs.
-        paint.setColor(Color.rgb(142, 69, 36)); c.drawOval(new RectF(-39, -4, 32, 30), paint);
-        paint.setColor(Color.rgb(190, 105, 55)); c.drawOval(new RectF(-34, -8, 27, 25), paint);
-        paint.setColor(Color.rgb(243, 225, 202)); c.drawOval(new RectF(-6, 8, 25, 24), paint);
-        drawDogTail(c, 0, true);
-        paint.setColor(Color.rgb(177, 91, 47)); c.drawOval(new RectF(10, -19, 45, 13), paint);
-        paint.setColor(Color.rgb(246, 230, 210)); c.drawOval(new RectF(30, -7, 49, 4), paint);
-        paint.setColor(Color.rgb(132, 61, 35));
-        Path ear = new Path(); ear.moveTo(17, -12); ear.quadTo(1, -7, 8, 8); ear.quadTo(14, 15, 21, 5); ear.close(); c.drawPath(ear, paint);
-        paint.setColor(Color.rgb(54, 36, 31)); paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(2.3f);
-        c.drawLine(32, -5, 38, -4, paint); paint.setStyle(Paint.Style.FILL);
-        c.drawOval(new RectF(44, -4, 50, 1), paint);
-        paint.setColor(Color.rgb(238, 217, 191)); c.drawOval(new RectF(11, 19, 23, 25), paint);
-        c.restore();
-        paint.setColor(Color.rgb(220, 240, 255)); paint.setTextSize(12); paint.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-        float drift = (time * 9f) % 7f; c.drawText("Z", 29f + drift, -25f - drift, paint); c.drawText("z", 39f + drift, -32f - drift, paint);
     }
 
     private void drawEars(Canvas c) {

@@ -60,6 +60,7 @@ public final class IslandListenerService extends NotificationListenerService {
     private boolean seekingMedia;
     private float cardStrength;
     private ValueAnimator dogRunAnimator;
+    private long dogBarkUntilUptime;
     private WindowManager.LayoutParams params;
     private String latestMessage = "";
     private boolean expanded;
@@ -221,8 +222,21 @@ public final class IslandListenerService extends NotificationListenerService {
         activityRow.setOrientation(LinearLayout.HORIZONTAL);
         mascot = new MascotView(this);
         mascot.setVariant(getSharedPreferences("settings", MODE_PRIVATE).getInt("mascot_variant", 0));
-        mascot.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        activityRow.addView(mascot, new LinearLayout.LayoutParams(dp(24), dp(24)));
+        mascot.setFocusable(true);
+        mascot.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+        mascot.setOnClickListener(v -> {
+            if (mascot.getVariant() == 3) {
+                dogBarkUntilUptime = SystemClock.uptimeMillis() + 1600L;
+                mascot.setDogBehavior(MascotView.DOG_BARK);
+                mascot.setContentDescription(expanded
+                        ? "English Cocker Spaniel. Tap to make the dog bark."
+                        : "English Cocker Spaniel. Tap to bark and open the activity card.");
+                if (!expanded) toggleExpanded();
+            } else {
+                toggleExpanded();
+            }
+        });
+        activityRow.addView(mascot, new LinearLayout.LayoutParams(dp(40), dp(40)));
 
         albumArt = new ImageView(this);
         albumArt.setScaleType(ImageView.ScaleType.CENTER_CROP);
@@ -321,18 +335,22 @@ public final class IslandListenerService extends NotificationListenerService {
             stopDogRun();
             return;
         }
-        if (expanded || currentMode != MascotView.IDLE) {
+        long now = SystemClock.uptimeMillis();
+        if (dogBarkUntilUptime > now) {
             stopDogRun();
+            mascot.setDogBehavior(MascotView.DOG_BARK);
             return;
         }
-        long phase = SystemClock.uptimeMillis() % 10000L;
-        if (phase < 1700L) {
+        dogBarkUntilUptime = 0L;
+        long phase = now % 10000L;
+        if (phase < 4200L) {
             mascot.setDogBehavior(MascotView.DOG_RUN);
-            if (dogRunAnimator == null) startDogRun();
-        } else if (phase < 5900L) {
+            if (expanded || currentMode != MascotView.IDLE) stopDogRun();
+            else if (dogRunAnimator == null) startDogRun();
+        } else if (phase < 7600L) {
             stopDogRun();
             mascot.setDogBehavior(MascotView.DOG_SLEEP);
-        } else if (phase < 7500L) {
+        } else if (phase < 8800L) {
             stopDogRun();
             mascot.setDogBehavior(MascotView.DOG_BARK);
         } else {
@@ -344,8 +362,8 @@ public final class IslandListenerService extends NotificationListenerService {
     private void startDogRun() {
         if (params == null || windowManager == null || island == null) return;
         int base = compactHorizontalOffset();
-        dogRunAnimator = ValueAnimator.ofInt(base, base + dp(30), base);
-        dogRunAnimator.setDuration(1500L);
+        dogRunAnimator = ValueAnimator.ofInt(base, base + dp(72), base);
+        dogRunAnimator.setDuration(3900L);
         dogRunAnimator.setInterpolator(new AccelerateDecelerateInterpolator());
         dogRunAnimator.addUpdateListener(animator -> {
             if (expanded || params == null || island == null) return;
