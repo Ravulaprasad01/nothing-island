@@ -15,6 +15,7 @@ import android.os.BatteryManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.media.MediaMetadata;
 import android.media.session.MediaController;
 import android.media.session.MediaSessionManager;
@@ -29,6 +30,9 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import java.util.List;
+import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public final class IslandListenerService extends NotificationListenerService {
     private static IslandListenerService instance;
@@ -41,6 +45,10 @@ public final class IslandListenerService extends NotificationListenerService {
     private boolean expanded;
     private boolean receiverRegistered;
     private int currentMode = MascotView.IDLE;
+    private String activeTimerKey;
+    private long timerEndElapsed = -1L;
+    private long timerFallbackSeconds = -1L;
+    private String timerLabel = "Timer";
     private ValueAnimator expansionAnimator;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable clearEvent = () -> {
@@ -59,6 +67,25 @@ public final class IslandListenerService extends NotificationListenerService {
         @Override public void run() {
             refreshMedia();
             handler.postDelayed(this, 1200);
+        }
+    };
+    private final Runnable timerTick = new Runnable() {
+        @Override public void run() {
+            if (activeTimerKey == null || currentMode != MascotView.TIMER) return;
+            long remaining = timerEndElapsed > 0
+                    ? Math.max(0L, (timerEndElapsed - SystemClock.elapsedRealtime() + 999L) / 1000L)
+                    : timerFallbackSeconds;
+            if (remaining >= 0) {
+                latestMessage = timerLabel + "  ·  " + formatDuration(remaining);
+                updateIsland();
+                if (remaining == 0 && timerEndElapsed > 0) {
+                    latestMessage = "Timer finished";
+                    updateIsland();
+                    return;
+                }
+                if (timerEndElapsed <= 0 && timerFallbackSeconds > 0) timerFallbackSeconds--;
+            }
+            handler.postDelayed(this, 1000L);
         }
     };
 
@@ -81,6 +108,10 @@ public final class IslandListenerService extends NotificationListenerService {
         }
     };
 
+    static void setMascotVariant(int variant) {
+        if (instance != null && instance.mascot != null) instance.mascot.setVariant(variant);
+    }
+
     public static void refreshIfRunning() {
         if (instance != null) instance.ensureOverlay();
     }
@@ -95,6 +126,15 @@ public final class IslandListenerService extends NotificationListenerService {
             receiverRegistered = true;
         }
         ensureOverlay();
+        // The timer may have been started before notification access was granted.
+        handler.post(() -> {
+            try {
+                StatusBarNotification[] active = getActiveNotifications();
+                if (active != null) for (StatusBarNotification notification : active) {
+                    if (updateTimerFromNotification(notification)) break;
+                }
+            } catch (RuntimeException ignored) { }
+        });
         handler.removeCallbacks(mediaPoll);
         handler.post(mediaPoll);
     }
@@ -115,6 +155,7 @@ public final class IslandListenerService extends NotificationListenerService {
         island.setBackground(background);
 
         mascot = new MascotView(this);
+        mascot.setVariant(getSharedPreferences("settings", MODE_PRIVATE).getInt("mascot_variant", 0));
         island.addView(mascot, new LinearLayout.LayoutParams(dp(30), dp(30)));
 
         message = new TextView(this);
@@ -229,6 +270,74 @@ public final class IslandListenerService extends NotificationListenerService {
         }
     }
 
+    private boolean updateTimerFromNotification(StatusBarNotification sbn) {
+        Notification notification = sbn == null ? null : sbn.getNotification();
+        if (notification == null || notification.extras == null || !isTimerNotification(sbn, notification)) return false;
+        CharSequence title = notification.extras.getCharSequence(Notification.EXTRA_TITLE);
+        CharSequence text = notification.extras.getCharSequence(Notification.EXTRA_TEXT);
+        String combined = join(title, text);
+        timerLabel = title == null || title.toString().trim().isEmpty() ? "Timer" : title.toString().trim();
+        activeTimerKey = sbn.getKey();
+        timerEndElapsed = -1L;
+        timerFallbackSeconds = parseDurationSeconds(combined);
+        boolean chronometer = notification.extras.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER, false);
+        boolean countdown = notification.extras.getBoolean(Notification.EXTRA_CHRONOMETER_COUNT_DOWN, false);
+        long when = notification.when;
+        long nowElapsed = SystemClock.elapsedRealtime();
+        // Android's notification chronometer uses elapsed-realtime as its base.
+        if (chronometer && countdown && when > nowElapsed && when < nowElapsed + 24L * 60L * 60L * 1000L) {
+            timerEndElapsed = when;
+        }
+        if (timerEndElapsed < 0 && timerFallbackSeconds >= 0) {
+            timerEndElapsed = nowElapsed + timerFallbackSeconds * 1000L;
+            timerFallbackSeconds = -1L;
+        }
+        if (timerEndElapsed < 0 && !chronometer && timerFallbackSeconds < 0) return false;
+        currentMode = MascotView.TIMER;
+        if (mascot != null) mascot.setMode(MascotView.TIMER);
+        if (!expanded) setExpanded(true);
+        handler.removeCallbacks(clearEvent);
+        handler.removeCallbacks(timerTick);
+        handler.post(timerTick);
+        return true;
+    }
+
+    private boolean isTimerNotification(StatusBarNotification sbn, Notification notification) {
+        String pkg = sbn.getPackageName() == null ? "" : sbn.getPackageName().toLowerCase(Locale.ROOT);
+        String channel = notification.getChannelId() == null ? "" : notification.getChannelId().toLowerCase(Locale.ROOT);
+        CharSequence title = notification.extras.getCharSequence(Notification.EXTRA_TITLE);
+        CharSequence text = notification.extras.getCharSequence(Notification.EXTRA_TEXT);
+        String words = (join(title, text) + " " + channel).toLowerCase(Locale.ROOT);
+        boolean clockApp = pkg.contains("deskclock") || pkg.contains("clock") || pkg.contains("clockpackage");
+        boolean timerWords = words.contains("timer") || words.contains("countdown") || words.contains("time left")
+                || words.contains("remaining") || words.contains("will ring in");
+        boolean chronometer = notification.extras.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER, false);
+        return (timerWords && (clockApp || channel.contains("timer") || chronometer))
+                || (clockApp && channel.contains("timer") && chronometer);
+    }
+
+    private long parseDurationSeconds(String value) {
+        if (value == null) return -1L;
+        Matcher matcher = Pattern.compile("(?<!\\d)(\\d{1,2}:)?(\\d{1,2}):(\\d{2})(?!\\d)").matcher(value);
+        if (!matcher.find()) return -1L;
+        String h = matcher.group(1);
+        String m = matcher.group(2);
+        String s = matcher.group(3);
+        try {
+            long hours = h == null ? 0L : Long.parseLong(h.substring(0, h.length() - 1));
+            return hours * 3600L + Long.parseLong(m) * 60L + Long.parseLong(s);
+        } catch (NumberFormatException ignored) { return -1L; }
+    }
+
+    private String formatDuration(long seconds) {
+        long hours = seconds / 3600L;
+        long minutes = (seconds % 3600L) / 60L;
+        long remainder = seconds % 60L;
+        return hours > 0
+                ? String.format(Locale.ROOT, "%d:%02d:%02d", hours, minutes, remainder)
+                : String.format(Locale.ROOT, "%d:%02d", minutes, remainder);
+    }
+
     private void updateIsland() {
         if (message == null || island == null) return;
         message.setText(expanded ? (latestMessage.isEmpty() ? "Nothing Island" : latestMessage) : compactText(latestMessage));
@@ -280,6 +389,7 @@ public final class IslandListenerService extends NotificationListenerService {
 
     @Override public void onNotificationPosted(StatusBarNotification sbn) {
         super.onNotificationPosted(sbn);
+        if (updateTimerFromNotification(sbn)) return;
         KeyguardManager keyguard = (KeyguardManager) getSystemService(KEYGUARD_SERVICE);
         if (keyguard != null && keyguard.isKeyguardLocked()) {
             showEvent("New notification", MascotView.EXCITED, true);
@@ -306,6 +416,14 @@ public final class IslandListenerService extends NotificationListenerService {
 
     @Override public void onNotificationRemoved(StatusBarNotification sbn) {
         super.onNotificationRemoved(sbn);
+        if (sbn != null && sbn.getKey() != null && sbn.getKey().equals(activeTimerKey)) {
+            activeTimerKey = null;
+            timerEndElapsed = -1L;
+            timerFallbackSeconds = -1L;
+            handler.removeCallbacks(timerTick);
+            showEvent("Nothing Island", MascotView.IDLE, false);
+            if (expanded) setExpanded(false);
+        }
     }
 
     @Override public void onListenerDisconnected() {
@@ -313,6 +431,7 @@ public final class IslandListenerService extends NotificationListenerService {
         if (expansionAnimator != null) expansionAnimator.cancel();
         expansionAnimator = null;
         handler.removeCallbacks(mediaPoll);
+        handler.removeCallbacks(timerTick);
         handler.removeCallbacks(clearEvent);
         instance = null;
         if (receiverRegistered) {
@@ -327,6 +446,7 @@ public final class IslandListenerService extends NotificationListenerService {
         if (expansionAnimator != null) expansionAnimator.cancel();
         expansionAnimator = null;
         handler.removeCallbacks(mediaPoll);
+        handler.removeCallbacks(timerTick);
         handler.removeCallbacks(clearEvent);
         instance = null;
         if (receiverRegistered) {

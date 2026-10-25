@@ -6,7 +6,7 @@ An original pocket creature for the Nothing Phone (2a), inspired by Dynamic Isla
 
 [Download Nothing-Island-debug.apk](Nothing-Island-debug.apk) from this repository. On GitHub, open the file and choose **Download raw file** (or **View raw**) to save it to your phone.
 
-**SHA-256:** `CCE5636CEBE8CBCED773DB168941B6F54CE52A60DED16382062EDB638A3B3216`
+**SHA-256:** `8DA88342FF9D80CF874574785A0D490AF59E1D90E9D0061637696087A712AA1E`
 
 This is a debug APK built from this source. It is for direct installation and testing, not a Play Store release. Google Play Protect may scan or warn about a sideloaded APK; this project cannot promise Play Protect or Google Play approval. Keep Play Protect enabled and only install the APK you downloaded from this repository. [Google Play Protect guidance](https://support.google.com/android/answer/2812853?hl=en)
 
@@ -21,6 +21,8 @@ This is a debug APK built from this source. It is for direct installation and te
 7. Check the separate overlay consent box and tap **Allow display over other apps**. In Android Settings, allow Nothing Island to display over other apps. Return to the app.
 8. Tap **Enable / refresh island**. The mascot appears just to the right of the camera cutout. Tap it to expand or collapse the card.
 
+To update an earlier installation, download and open the new APK. Android should offer **Update**. If it reports a signature conflict, uninstall the older build first, then install the new APK; uninstalling clears that app's local settings.
+
 The app cannot show the island until both notification access and display-over-other-apps access are granted. The app itself does not grant these permissions; Android asks you to confirm each one in Settings. You can revoke either permission there whenever you want.
 
 ## What it does
@@ -31,6 +33,7 @@ The app cannot show the island until both notification access and display-over-o
 - **Delivery alerts:** Matching order and delivery notification text triggers a scooter animation. This is a visual reaction to notification text, not live order tracking; some apps or wording may not be recognized.
 - **Notifications:** Notification title and short text appear in the expanded card. On the lock screen, the island uses a generic “New notification” message instead of showing the notification content.
 - **Charging:** While charging, the mascot shows a charging reaction and battery percentage.
+- **Timers:** Clock/timer notifications are checked both when notification access connects and as new notifications arrive. A detected countdown expands the island and shows the remaining time; the card stays visible until the timer notification is dismissed. Timer display depends on the Clock app publishing a readable timer notification with a countdown or remaining-time value. Make sure Nothing Island's notification access remains enabled.
 
 ## Privacy and permissions
 
@@ -47,6 +50,7 @@ Nothing Island uses Android's notification-listener access to read notification 
 - This is an overlay app; it does not modify Nothing OS or become a native system feature.
 - Music animation follows Android media-session playback state, not the audio waveform.
 - Delivery detection relies on simple notification text and known app names; it may miss orders or misclassify messages.
+- Timer detection relies on the Clock app's notification metadata/text. Clock implementations that hide the active timer from notifications cannot be detected by a third-party listener.
 - The debug APK may produce a Play Protect warning because it is sideloaded and not Play Store-reviewed.
 
 ## Build from source

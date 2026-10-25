@@ -15,6 +15,9 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.LinearLayout;
+import android.widget.RadioButton;
+import android.widget.RadioGroup;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 public final class MainActivity extends Activity {
@@ -52,14 +55,56 @@ public final class MainActivity extends Activity {
         root.addView(title);
 
         TextView intro = new TextView(this);
-        intro.setText("A compact island for notifications, media updates, and charging status. It runs as an on-screen overlay; it does not modify Nothing OS.");
+        intro.setText("A translucent, animated companion that sits over the camera cutout. Tap the island for music controls, live activity cards, timers, delivery updates, and more.");
         intro.setTextColor(Color.DKGRAY);
         intro.setTextSize(16);
         intro.setPadding(0, dp(12), 0, dp(20));
         root.addView(intro);
 
+        TextView companionHeading = new TextView(this);
+        companionHeading.setText("Choose your companion");
+        companionHeading.setTextColor(Color.rgb(24, 24, 28));
+        companionHeading.setTextSize(18);
+        companionHeading.setTypeface(null, android.graphics.Typeface.BOLD);
+        root.addView(companionHeading);
+
+        LinearLayout previewRow = new LinearLayout(this);
+        previewRow.setGravity(Gravity.CENTER_VERTICAL);
+        previewRow.setPadding(0, dp(8), 0, dp(8));
+        MascotView preview = new MascotView(this);
+        int selectedVariant = getSharedPreferences("settings", MODE_PRIVATE).getInt("mascot_variant", 0);
+        preview.setVariant(selectedVariant);
+        preview.setMode(MascotView.EXCITED);
+        previewRow.addView(preview, new LinearLayout.LayoutParams(dp(64), dp(64)));
+        TextView companionHint = new TextView(this);
+        companionHint.setText("Four original styles. Change yours any time.");
+        companionHint.setTextColor(Color.DKGRAY);
+        companionHint.setTextSize(14);
+        companionHint.setPadding(dp(12), 0, 0, 0);
+        previewRow.addView(companionHint);
+        root.addView(previewRow);
+
+        RadioGroup mascotChoices = new RadioGroup(this);
+        mascotChoices.setOrientation(RadioGroup.VERTICAL);
+        String[] names = {"Pip · Ember", "Bubbles · Tide", "Moss · Sprout", "Mochi · Dusk"};
+        for (int i = 0; i < names.length; i++) {
+            RadioButton choice = new RadioButton(this);
+            choice.setId(100 + i);
+            choice.setText(names[i]);
+            choice.setTextSize(15);
+            mascotChoices.addView(choice);
+        }
+        mascotChoices.check(100 + Math.max(0, Math.min(3, selectedVariant)));
+        mascotChoices.setOnCheckedChangeListener((group, checkedId) -> {
+            int variant = Math.max(0, Math.min(3, checkedId - 100));
+            getSharedPreferences("settings", MODE_PRIVATE).edit().putInt("mascot_variant", variant).apply();
+            preview.setVariant(variant);
+            IslandListenerService.setMascotVariant(variant);
+        });
+        root.addView(mascotChoices);
+
         TextView privacy = new TextView(this);
-        privacy.setText("Privacy: notification titles and short text are read only to show them in the island. Content stays on this phone. This app has no internet permission and does not send or store notification content. You can revoke notification access or overlay access at any time in Android Settings.");
+        privacy.setText("Privacy: notification text and active media metadata are handled on this phone. No internet permission or analytics. Notification and overlay access are separately requested and can be revoked in Android Settings.");
         privacy.setTextColor(Color.rgb(48, 48, 48));
         privacy.setTextSize(14);
         privacy.setPadding(dp(16), dp(16), dp(16), dp(16));
@@ -78,7 +123,7 @@ public final class MainActivity extends Activity {
 
         notificationConsent = new CheckBox(this);
         notificationConsent.setText("I agree to let Nothing Island read notification titles and text to display them in the island.");
-        notificationConsent.setChecked(getPreferences(MODE_PRIVATE).getBoolean("notification_disclosure_accepted", false));
+        notificationConsent.setChecked(getSharedPreferences("settings", MODE_PRIVATE).getBoolean("notification_disclosure_accepted", false));
         root.addView(notificationConsent);
         Button notificationButton = button("Enable notification access");
         notificationButton.setOnClickListener(v -> openNotificationSettings());
@@ -86,7 +131,7 @@ public final class MainActivity extends Activity {
 
         overlayConsent = new CheckBox(this);
         overlayConsent.setText("I agree to let Nothing Island draw the island over other apps. The overlay can be turned off in Android Settings.");
-        overlayConsent.setChecked(getPreferences(MODE_PRIVATE).getBoolean("overlay_disclosure_accepted", false));
+        overlayConsent.setChecked(getSharedPreferences("settings", MODE_PRIVATE).getBoolean("overlay_disclosure_accepted", false));
         LinearLayout.LayoutParams consentParams = new LinearLayout.LayoutParams(-1, -2);
         consentParams.topMargin = dp(12);
         root.addView(overlayConsent, consentParams);
@@ -100,7 +145,10 @@ public final class MainActivity extends Activity {
         startParams.topMargin = dp(14);
         root.addView(startButton, startParams);
 
-        setContentView(root);
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.addView(root);
+        setContentView(scroll);
         refreshStatus();
     }
 
@@ -114,7 +162,7 @@ public final class MainActivity extends Activity {
     private void showPrivacyDetails() {
         new AlertDialog.Builder(this)
                 .setTitle("Privacy details")
-                .setMessage("Nothing Island reads notification titles and short text only to display them in the island. It also checks active media session title and artist while music is playing, and reads charging state and battery percentage. These are processed on this phone, shown temporarily, and are not sent to a server or saved by this app. The app has no Internet permission and includes no analytics or advertising SDK.\n\nNotification access and display-over-other-apps access are optional Android special permissions. If you decline either, the related island feature stays off. You can revoke either permission at any time in Android Settings. Nothing Island does not use the Accessibility Service API, inspect screen contents, control other apps, or cancel notifications.\n\nAvoid enabling notification access if you do not want notification text shown in the island. For Play Store distribution, the publisher must also host and link a public copy of this policy and complete Google Play's Data safety and permission declarations.")
+                .setMessage("Nothing Island reads notification titles and short text to display alert cards, active media metadata to show and control playback, and battery state for charging updates. Activity recognition is based on notification text. These are processed on this phone and are not sent to a server or saved by this app. The app has no Internet permission and includes no analytics or advertising SDK.\n\nNotification access and display-over-other-apps access are optional Android special permissions. They must be granted in Android Settings and can be revoked there at any time. Music controls send only the actions you tap (previous, play/pause, next) to the active media session. The app does not use the Accessibility Service API or inspect screen contents.\n\nAvoid enabling notification access if you do not want notification text shown in the island. For Play Store distribution, the publisher must also host and link a public copy of this policy and complete Google Play's Data safety and permission declarations.")
                 .setPositiveButton("Close", null)
                 .show();
     }
@@ -124,7 +172,7 @@ public final class MainActivity extends Activity {
             notificationConsent.setError("Read the disclosure and check this box to continue.");
             return;
         }
-        getPreferences(MODE_PRIVATE).edit().putBoolean("notification_disclosure_accepted", true).apply();
+        getSharedPreferences("settings", MODE_PRIVATE).edit().putBoolean("notification_disclosure_accepted", true).apply();
         startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
     }
 
@@ -133,7 +181,7 @@ public final class MainActivity extends Activity {
             overlayConsent.setError("Read the disclosure and check this box to continue.");
             return;
         }
-        getPreferences(MODE_PRIVATE).edit().putBoolean("overlay_disclosure_accepted", true).apply();
+        getSharedPreferences("settings", MODE_PRIVATE).edit().putBoolean("overlay_disclosure_accepted", true).apply();
         Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                 Uri.parse("package:" + getPackageName()));
         startActivity(intent);
