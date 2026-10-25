@@ -6,7 +6,7 @@ An animated companion for the Nothing Phone (2a), inspired by Dynamic Island and
 
 [Download Nothing-Island-debug.apk](Nothing-Island-debug.apk) from this repository. On GitHub, open the file and choose **Download raw file** (or **View raw**) to save it to your phone.
 
-**SHA-256:** `1165C37CE568F94634D4900CC55CD1B8D9546D806B64667CC30E10050B1ABB0C`
+**SHA-256:** `F5A80E71C2FE304E72C926045B55A9C2C66F4275F574CB9CE6D4600A67227731`
 
 This is a debug APK built from this source. It is for direct installation and testing, not a Play Store release. Google Play Protect may scan or warn about a sideloaded APK; this project cannot promise Play Protect or Google Play approval. Keep Play Protect enabled and only install the APK you downloaded from this repository. [Google Play Protect guidance](https://support.google.com/android/answer/2812853?hl=en)
 
@@ -27,7 +27,7 @@ The app cannot show the island until both notification access and display-over-o
 
 ## What it does
 
-- **Companions:** Choose Pikachu, Squirtle, Bulbasaur, or a full-body English Cocker Spaniel cutout based on the supplied reference. The dog sprite is transparent and cycles through a small run, sleep, and visual bark animation along the top status area. It does not play bark audio. Pokémon drawings react to media, delivery, timers, and other live activities. The picker and previews appear after you tap **Choose mascot style**.
+- **Companions:** Choose Pikachu, Squirtle, Bulbasaur, or an English Cocker Spaniel. The dog is drawn and animated directly on the transparent Canvas: its legs cycle in a running gait, its tail and long ears wag/sway, it curls up and breathes while sleeping, and its mouth opens during a visual bark. When running in the compact top slot, the whole mascot also travels smoothly along the status bar. Barking is visual only and plays no audio. Pokémon drawings react to media, delivery, timers, and other live activities. The picker and previews appear after you tap **Choose mascot style**.
 - **Tap to expand:** The background-free 24dp mascot sits inside an accessible 48dp touch target, lowered slightly beside the clock. Tapping expands it into a translucent activity card with an eased 360 ms transition. Android screen readers can read the companion's name and card state; media controls have individual labels. The app does not force spoken announcements.
 - **Music:** The expanded mini player shows available album artwork, track/artist, playback progress, and previous, play/pause, next, and seek controls. Tap the artwork to open the player's own app. The controls work when the active media session supports those actions.
 - **Delivery alerts:** Matching order and delivery notification text triggers a scooter animation. This is a visual reaction to notification text, not live order tracking; some apps or wording may not be recognized.
