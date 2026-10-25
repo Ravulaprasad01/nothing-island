@@ -8,6 +8,7 @@ import android.content.IntentFilter;
 import android.app.KeyguardManager;
 import android.animation.ValueAnimator;
 import android.graphics.Color;
+import android.graphics.Bitmap;
 import android.graphics.PixelFormat;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -27,6 +28,8 @@ import android.view.animation.AccelerateDecelerateInterpolator;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.LinearLayout;
+import android.widget.ImageView;
+import android.widget.SeekBar;
 import android.widget.TextView;
 
 import java.util.List;
@@ -40,11 +43,17 @@ public final class IslandListenerService extends NotificationListenerService {
     private static IslandListenerService instance;
     private WindowManager windowManager;
     private LinearLayout island;
+    private LinearLayout activityRow;
     private TextView message;
     private LinearLayout mediaControls;
     private TextView playPauseControl;
+    private TextView previousControl;
+    private TextView nextControl;
+    private ImageView albumArt;
+    private SeekBar seekBar;
     private MascotView mascot;
     private MediaController activeMediaController;
+    private boolean seekingMedia;
     private WindowManager.LayoutParams params;
     private String latestMessage = "";
     private boolean expanded;
@@ -54,6 +63,8 @@ public final class IslandListenerService extends NotificationListenerService {
     private long timerEndElapsed = -1L;
     private long timerFallbackSeconds = -1L;
     private String timerLabel = "Timer";
+    private android.app.PendingIntent latestNotificationIntent;
+    private String latestNotificationKey;
     private final Map<String, LiveActivity> liveActivities = new LinkedHashMap<>();
     private ValueAnimator expansionAnimator;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -159,19 +170,34 @@ public final class IslandListenerService extends NotificationListenerService {
 
         island = new LinearLayout(this);
         island.setGravity(Gravity.CENTER);
-        island.setOrientation(LinearLayout.HORIZONTAL);
-        island.setGravity(Gravity.CENTER);
-        island.setPadding(dp(8), dp(6), dp(8), dp(6));
+        island.setOrientation(LinearLayout.VERTICAL);
+        island.setPadding(dp(4), dp(4), dp(4), dp(4));
         GradientDrawable background = new GradientDrawable();
-        background.setColor(Color.argb(216, 13, 15, 18));
-        background.setStroke(dp(1), Color.argb(40, 255, 255, 255));
+        background.setColor(Color.argb(160, 13, 15, 18));
+        background.setStroke(dp(1), Color.argb(72, 255, 255, 255));
         background.setCornerRadius(dp(40));
         island.setBackground(background);
         island.setElevation(dp(8));
 
+        activityRow = new LinearLayout(this);
+        activityRow.setGravity(Gravity.CENTER);
+        activityRow.setOrientation(LinearLayout.HORIZONTAL);
         mascot = new MascotView(this);
         mascot.setVariant(getSharedPreferences("settings", MODE_PRIVATE).getInt("mascot_variant", 0));
-        island.addView(mascot, new LinearLayout.LayoutParams(dp(30), dp(30)));
+        activityRow.addView(mascot, new LinearLayout.LayoutParams(dp(24), dp(24)));
+
+        albumArt = new ImageView(this);
+        albumArt.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        GradientDrawable artBackground = new GradientDrawable();
+        artBackground.setColor(Color.rgb(49, 55, 62));
+        artBackground.setCornerRadius(dp(10));
+        albumArt.setBackground(artBackground);
+        albumArt.setClipToOutline(true);
+        albumArt.setVisibility(View.GONE);
+        LinearLayout.LayoutParams artParams = new LinearLayout.LayoutParams(dp(44), dp(44));
+        artParams.setMargins(dp(8), 0, dp(8), 0);
+        activityRow.addView(albumArt, artParams);
+        albumArt.setOnClickListener(v -> openMediaPlayer());
 
         message = new TextView(this);
         message.setTextColor(Color.WHITE);
@@ -181,30 +207,55 @@ public final class IslandListenerService extends NotificationListenerService {
         message.setMaxLines(2);
         message.setPadding(dp(8), 0, 0, 0);
         message.setVisibility(View.GONE);
-        island.addView(message, new LinearLayout.LayoutParams(0, -2, 1f));
+        message.setOnClickListener(v -> openLatestNotification());
+        activityRow.addView(message, new LinearLayout.LayoutParams(0, -2, 1f));
+        island.addView(activityRow, new LinearLayout.LayoutParams(-1, 0, 1f));
+
         mediaControls = new LinearLayout(this);
-        mediaControls.setGravity(Gravity.CENTER);
+        mediaControls.setGravity(Gravity.CENTER_VERTICAL);
         mediaControls.setOrientation(LinearLayout.HORIZONTAL);
         mediaControls.setVisibility(View.GONE);
-        TextView previous = mediaButton("‹‹", "Previous track");
+        previousControl = mediaButton("|‹", "Previous track");
         playPauseControl = mediaButton("Ⅱ", "Play or pause");
-        TextView next = mediaButton("››", "Next track");
-        mediaControls.addView(previous);
+        nextControl = mediaButton("›|", "Next track");
+        mediaControls.addView(previousControl);
+        seekBar = new SeekBar(this);
+        seekBar.setMax(1000);
+        seekBar.setProgressTintList(android.content.res.ColorStateList.valueOf(Color.rgb(111, 220, 202)));
+        seekBar.setThumbTintList(android.content.res.ColorStateList.valueOf(Color.rgb(235, 255, 250)));
+        LinearLayout.LayoutParams seekParams = new LinearLayout.LayoutParams(0, dp(40), 1f);
+        seekParams.setMargins(dp(4), 0, dp(4), 0);
+        mediaControls.addView(seekBar, seekParams);
         mediaControls.addView(playPauseControl);
-        mediaControls.addView(next);
-        previous.setOnClickListener(v -> controlMedia(PlaybackState.ACTION_SKIP_TO_PREVIOUS));
+        mediaControls.addView(nextControl);
+        previousControl.setOnClickListener(v -> controlMedia(PlaybackState.ACTION_SKIP_TO_PREVIOUS));
         playPauseControl.setOnClickListener(v -> toggleMediaPlayback());
-        next.setOnClickListener(v -> controlMedia(PlaybackState.ACTION_SKIP_TO_NEXT));
-        island.addView(mediaControls, new LinearLayout.LayoutParams(-2, dp(42)));
+        nextControl.setOnClickListener(v -> controlMedia(PlaybackState.ACTION_SKIP_TO_NEXT));
+        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) { }
+            @Override public void onStartTrackingTouch(SeekBar bar) { seekingMedia = true; }
+            @Override public void onStopTrackingTouch(SeekBar bar) {
+                seekingMedia = false;
+                MediaController controller = activeMediaController;
+                PlaybackState state = controller == null ? null : controller.getPlaybackState();
+                MediaMetadata metadata = controller == null ? null : controller.getMetadata();
+                long duration = metadata == null ? 0L : metadata.getLong(MediaMetadata.METADATA_KEY_DURATION);
+                if (controller != null && state != null && duration > 0
+                        && (state.getActions() & PlaybackState.ACTION_SEEK_TO) != 0) {
+                    controller.getTransportControls().seekTo(duration * bar.getProgress() / bar.getMax());
+                }
+            }
+        });
+        island.addView(mediaControls, new LinearLayout.LayoutParams(-1, dp(48)));
         island.setOnClickListener(v -> toggleExpanded());
 
         params = new WindowManager.LayoutParams(
-                dp(104), dp(46), WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                dp(34), dp(32), WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT);
         params.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
-        // Nothing Phone (2a) has a centered punch-hole. Keep the compact pill centered on it.
-        params.x = 0;
+        // Match the Nothing Phone (2a) status-bar timer slot beside the clock, as requested.
+        params.x = compactHorizontalOffset();
         params.y = 0;
         params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
         try {
@@ -232,8 +283,10 @@ public final class IslandListenerService extends NotificationListenerService {
         } else {
             message.setMaxLines(1);
         }
-        island.setGravity(expanded ? (Gravity.CENTER_VERTICAL | Gravity.START) : Gravity.CENTER);
+        island.setGravity(Gravity.CENTER);
+        activityRow.setGravity(expanded ? (Gravity.CENTER_VERTICAL | Gravity.START) : Gravity.CENTER);
         if (mediaControls != null) mediaControls.setVisibility(expanded && hasMediaActivity() ? View.VISIBLE : View.GONE);
+        if (albumArt != null) albumArt.setVisibility(expanded && hasMediaActivity() ? View.VISIBLE : View.GONE);
         int startWidth = params.width;
         int startHeight = params.height;
         int startX = params.x;
@@ -243,14 +296,14 @@ public final class IslandListenerService extends NotificationListenerService {
         int startPadRight = island.getPaddingRight();
         int startPadV = island.getPaddingTop();
         int startMessagePad = message.getPaddingLeft();
-        int endWidth = dp(expanded ? (activeMediaController == null ? 340 : 370) : 104);
-        int endHeight = dp(expanded ? (activeMediaController == null ? 100 : 118) : 46);
-        int endX = 0;
-        int endY = 0;
-        int endMascot = dp(expanded ? 64 : 30);
-        int endPadH = dp(expanded ? 14 : 8);
-        int endPadRight = dp(expanded ? 14 : 8);
-        int endPadV = dp(expanded ? 10 : 6);
+        int endWidth = dp(expanded ? (hasMediaActivity() ? 370 : 340) : 34);
+        int endHeight = dp(expanded ? (hasMediaActivity() ? 142 : 100) : 32);
+        int endX = expanded ? 0 : compactHorizontalOffset();
+        int endY = dp(expanded ? 18 : 0);
+        int endMascot = dp(expanded ? 52 : 24);
+        int endPadH = dp(expanded ? 14 : 4);
+        int endPadRight = dp(expanded ? 14 : 4);
+        int endPadV = dp(expanded ? 10 : 4);
         int endMessagePad = dp(expanded ? 10 : 0);
         expansionAnimator = ValueAnimator.ofFloat(0f, 1f);
         expansionAnimator.setDuration(360);
@@ -285,6 +338,12 @@ public final class IslandListenerService extends NotificationListenerService {
         return start + Math.round((end - start) * fraction);
     }
 
+    private int compactHorizontalOffset() {
+        int width = getResources().getDisplayMetrics().widthPixels;
+        int targetCenter = Math.round(width * 0.255f);
+        return targetCenter - width / 2;
+    }
+
     private TextView mediaButton(String label, String description) {
         TextView button = new TextView(this);
         button.setText(label);
@@ -299,8 +358,8 @@ public final class IslandListenerService extends NotificationListenerService {
         button.setBackground(shape);
         button.setClickable(true);
         button.setFocusable(true);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(40), dp(40));
-        lp.setMargins(dp(3), 0, dp(3), 0);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(44), dp(44));
+        lp.setMargins(dp(2), 0, dp(2), 0);
         button.setLayoutParams(lp);
         return button;
     }
@@ -327,6 +386,21 @@ public final class IslandListenerService extends NotificationListenerService {
         handler.postDelayed(mediaPoll, 180L);
     }
 
+    private void openMediaPlayer() {
+        MediaController controller = activeMediaController;
+        if (controller == null) return;
+        try {
+            android.app.PendingIntent launch = controller.getSessionActivity();
+            if (launch != null) launch.send();
+        } catch (android.app.PendingIntent.CanceledException | RuntimeException ignored) { }
+    }
+
+    private void openLatestNotification() {
+        if (!expanded || latestNotificationIntent == null) return;
+        try { latestNotificationIntent.send(); }
+        catch (android.app.PendingIntent.CanceledException | RuntimeException ignored) { }
+    }
+
     private void showMessage(String text, boolean temporary) {
         latestMessage = text == null ? "" : text.trim();
         updateIsland();
@@ -351,6 +425,8 @@ public final class IslandListenerService extends NotificationListenerService {
         CharSequence title = notification.extras.getCharSequence(Notification.EXTRA_TITLE);
         CharSequence text = notification.extras.getCharSequence(Notification.EXTRA_TEXT);
         String combined = join(title, text);
+        latestNotificationIntent = notification.contentIntent;
+        latestNotificationKey = sbn.getKey();
         String titleText = title == null ? "" : title.toString().trim();
         timerLabel = titleText.isEmpty() || parseDurationSeconds(titleText) >= 0
                 ? "Timer" : titleText;
@@ -458,6 +534,7 @@ public final class IslandListenerService extends NotificationListenerService {
         if (message == null || island == null) return;
         message.setText(expanded ? (latestMessage.isEmpty() ? "Nothing Island" : latestMessage) : compactText(latestMessage));
         if (mediaControls != null) mediaControls.setVisibility(expanded && hasMediaActivity() ? View.VISIBLE : View.GONE);
+        if (albumArt != null) albumArt.setVisibility(expanded && hasMediaActivity() ? View.VISIBLE : View.GONE);
         if (playPauseControl != null && activeMediaController != null) {
             PlaybackState state = activeMediaController.getPlaybackState();
             playPauseControl.setText(state != null && state.getState() == PlaybackState.STATE_PLAYING ? "Ⅱ" : "▶");
@@ -490,7 +567,21 @@ public final class IslandListenerService extends NotificationListenerService {
                 boolean playing = state != null && state.getState() == PlaybackState.STATE_PLAYING;
                 currentMode = playing ? MascotView.SINGING : MascotView.PAUSED;
                 latestMessage = (playing ? "♪  " : "♫  Paused · ") + song;
+                if (albumArt != null) {
+                    Bitmap art = metadata == null ? null : metadata.getBitmap(MediaMetadata.METADATA_KEY_ART);
+                    if (art == null && metadata != null) art = metadata.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART);
+                    albumArt.setImageBitmap(art);
+                    albumArt.setContentDescription(title == null ? "Album artwork" : "Album artwork for " + title);
+                }
+                if (seekBar != null && !seekingMedia) {
+                    long duration = metadata == null ? 0L : metadata.getLong(MediaMetadata.METADATA_KEY_DURATION);
+                    long position = state == null ? 0L : Math.max(0L, state.getPosition());
+                    seekBar.setProgress(duration > 0L ? (int) Math.min(1000L, position * 1000L / duration) : 0);
+                    seekBar.setEnabled(duration > 0L && state != null
+                            && (state.getActions() & PlaybackState.ACTION_SEEK_TO) != 0);
+                }
                 if (mediaControls != null) mediaControls.setVisibility(expanded && hasMediaActivity() ? View.VISIBLE : View.GONE);
+                if (albumArt != null) albumArt.setVisibility(expanded && hasMediaActivity() ? View.VISIBLE : View.GONE);
                 updateIsland();
             } else {
                 activeMediaController = null;
@@ -532,6 +623,8 @@ public final class IslandListenerService extends NotificationListenerService {
         LiveActivity activity = classifyLiveActivity(sbn);
         if (activity != null && sbn.isOngoing()) {
             liveActivities.put(sbn.getKey(), activity);
+            latestNotificationIntent = sbn.getNotification().contentIntent;
+            latestNotificationKey = sbn.getKey();
             if (!expanded) setExpanded(true);
             showEvent(activity.text, activity.mode, false);
             return;
@@ -544,6 +637,8 @@ public final class IslandListenerService extends NotificationListenerService {
         }
         Notification notification = sbn.getNotification();
         if (notification == null || notification.extras == null) return;
+        latestNotificationIntent = notification.contentIntent;
+        latestNotificationKey = sbn.getKey();
         CharSequence title = notification.extras.getCharSequence(Notification.EXTRA_TITLE);
         CharSequence text = notification.extras.getCharSequence(Notification.EXTRA_TEXT);
         String content = join(title, text);
@@ -564,6 +659,10 @@ public final class IslandListenerService extends NotificationListenerService {
     @Override public void onNotificationRemoved(StatusBarNotification sbn) {
         super.onNotificationRemoved(sbn);
         if (sbn != null && sbn.getKey() != null) {
+            if (sbn.getKey().equals(latestNotificationKey)) {
+                latestNotificationIntent = null;
+                latestNotificationKey = null;
+            }
             LiveActivity removedActivity = liveActivities.remove(sbn.getKey());
             if (removedActivity != null && currentMode == removedActivity.mode && activeTimerKey == null) {
                 LiveActivity next = null;

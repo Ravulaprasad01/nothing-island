@@ -9,7 +9,7 @@ import android.graphics.RectF;
 import android.os.SystemClock;
 import android.view.View;
 
-/** An original tiny island companion, drawn with Android Canvas so no image/network SDK is needed. */
+/** Tiny animated Pokémon companions drawn locally with Canvas; no network or image SDK is used. */
 final class MascotView extends View {
     static final int IDLE = 0;
     static final int SINGING = 1;
@@ -41,7 +41,7 @@ final class MascotView extends View {
     }
 
     void setVariant(int next) {
-        int normalized = Math.max(0, Math.min(3, next));
+        int normalized = Math.max(0, Math.min(2, next));
         if (variant != normalized) {
             variant = normalized;
             invalidate();
@@ -50,19 +50,17 @@ final class MascotView extends View {
 
     private int bodyColor() {
         switch (variant) {
-            case 1: return Color.rgb(57, 183, 190);   // Tide
-            case 2: return Color.rgb(138, 191, 91);   // Sprout
-            case 3: return Color.rgb(165, 130, 224);  // Dusk
-            default: return Color.rgb(255, 117, 107); // Pip
+            case 1: return Color.rgb(112, 203, 225); // Squirtle
+            case 2: return Color.rgb(111, 190, 139); // Bulbasaur
+            default: return Color.rgb(255, 207, 67); // Pikachu
         }
     }
 
-    private int cheekColor() {
+    private int lightColor() {
         switch (variant) {
-            case 1: return Color.rgb(105, 222, 215);
-            case 2: return Color.rgb(183, 219, 124);
-            case 3: return Color.rgb(205, 170, 237);
-            default: return Color.rgb(255, 160, 144);
+            case 1: return Color.rgb(211, 239, 228);
+            case 2: return Color.rgb(177, 222, 156);
+            default: return Color.rgb(255, 237, 144);
         }
     }
 
@@ -77,14 +75,17 @@ final class MascotView extends View {
 
         float time = (SystemClock.uptimeMillis() % 1600L) / 1600f;
         float bob = (mode == SINGING || mode == EXCITED || mode == DELIVERY)
-                ? (float) Math.sin(time * Math.PI * 4) * 3f
+                ? (float) Math.sin(time * Math.PI * 4) * 3.2f
                 : (float) Math.sin(time * Math.PI * 2) * 1.5f;
         canvas.translate(0f, bob);
 
         if (mode == DELIVERY) drawScooter(canvas, time);
+        drawBack(canvas, time);
         drawEars(canvas);
         drawBody(canvas);
         drawFace(canvas, time);
+        if (variant == 2) drawBulbasaurLeaves(canvas, time);
+        if (variant == 1 && (mode == SINGING || mode == CHARGING || mode == EXCITED)) drawWaterBubbles(canvas, time);
         if (mode == SINGING) drawNotes(canvas, time);
         else if (mode == CHARGING || mode == TORCH) drawSpark(canvas, time);
         else if (mode == TIMER) drawTimer(canvas, time);
@@ -95,38 +96,105 @@ final class MascotView extends View {
         else if (mode == PAUSED) drawPauseIcon(canvas);
 
         canvas.restore();
-        postInvalidateDelayed(mode == IDLE || mode == CHARGING ? 120 : 32);
+        postInvalidateDelayed(mode == IDLE ? 70 : 32);
     }
 
     private void drawEars(Canvas c) {
         paint.setColor(bodyColor());
         paint.setStyle(Paint.Style.FILL);
         Path left = new Path();
-        left.moveTo(-24, -23); left.lineTo(-36, -45); left.quadTo(-15, -40, -12, -28); left.close();
-        c.drawPath(left, paint);
         Path right = new Path();
-        right.moveTo(20, -25); right.lineTo(36, -42); right.quadTo(35, -20, 14, -20); right.close();
-        c.drawPath(right, paint);
-        paint.setColor(variant == 1 ? Color.rgb(191, 249, 238) : variant == 2 ? Color.rgb(227, 245, 190)
-                : variant == 3 ? Color.rgb(231, 214, 255) : Color.rgb(255, 207, 171));
-        c.drawCircle(-24, -32, 4, paint);
-        c.drawCircle(29, -30, 4, paint);
+        if (variant == 0) {
+            left.moveTo(-22, -22); left.lineTo(-34, -55); left.quadTo(-15, -47, -10, -27); left.close();
+            right.moveTo(19, -25); right.lineTo(34, -55); right.quadTo(35, -30, 14, -21); right.close();
+            c.drawPath(left, paint); c.drawPath(right, paint);
+            paint.setColor(Color.rgb(45, 41, 38));
+            Path tip = new Path(); tip.moveTo(-34, -55); tip.lineTo(-25, -44); tip.lineTo(-30, -41); tip.close(); c.drawPath(tip, paint);
+            tip.reset(); tip.moveTo(34, -55); tip.lineTo(29, -43); tip.lineTo(24, -46); tip.close(); c.drawPath(tip, paint);
+        } else if (variant == 1) {
+            left.moveTo(-26, -24); left.quadTo(-43, -43, -46, -32); left.quadTo(-43, -18, -25, -16); left.close();
+            right.moveTo(26, -24); right.quadTo(43, -43, 46, -32); right.quadTo(43, -18, 25, -16); right.close();
+            c.drawPath(left, paint); c.drawPath(right, paint);
+            paint.setColor(Color.rgb(255, 222, 186));
+            c.drawCircle(-36, -29, 4, paint); c.drawCircle(36, -29, 4, paint);
+        } else {
+            left.moveTo(-25, -24); left.lineTo(-38, -39); left.quadTo(-37, -19, -19, -18); left.close();
+            right.moveTo(25, -24); right.lineTo(38, -39); right.quadTo(37, -19, 19, -18); right.close();
+            c.drawPath(left, paint); c.drawPath(right, paint);
+        }
     }
 
     private void drawBody(Canvas c) {
+        if (variant == 1) {
+            paint.setColor(Color.rgb(128, 82, 56));
+            c.drawOval(new RectF(-34, -10, 35, 37), paint);
+            paint.setColor(Color.rgb(223, 177, 116));
+            c.drawOval(new RectF(-28, -7, 29, 31), paint);
+            paint.setColor(Color.rgb(124, 81, 55));
+            paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(2.6f);
+            c.drawArc(new RectF(-24, -4, 24, 27), 205, 130, false, paint);
+            c.drawLine(0, -2, 0, 26, paint);
+            paint.setStyle(Paint.Style.FILL);
+        } else if (variant == 2) {
+            paint.setColor(bodyColor());
+            c.drawOval(new RectF(-36, -23, 35, 32), paint);
+            paint.setColor(Color.rgb(47, 125, 105));
+            c.drawOval(new RectF(-27, -16, -16, -5), paint);
+            c.drawOval(new RectF(13, -12, 25, -2), paint);
+            c.drawOval(new RectF(-5, 13, 7, 23), paint);
+        } else {
+            paint.setColor(bodyColor());
+            c.drawOval(new RectF(-31, -28, 31, 36), paint);
+            paint.setColor(lightColor());
+            c.drawOval(new RectF(-20, 10, 20, 34), paint);
+            paint.setColor(Color.rgb(231, 66, 72));
+            c.drawCircle(-28, 13, 7, paint); c.drawCircle(28, 13, 7, paint);
+        }
+
+        if (variant == 1) {
+            paint.setColor(bodyColor());
+            c.drawOval(new RectF(-30, -42, 30, 9), paint);
+            paint.setColor(lightColor());
+            c.drawOval(new RectF(-25, -35, 25, -2), paint);
+        } else if (variant == 2) {
+            paint.setColor(bodyColor());
+            c.drawOval(new RectF(-27, -43, 27, 4), paint);
+            paint.setColor(Color.rgb(48, 133, 100));
+            c.drawOval(new RectF(-18, -36, 18, -5), paint);
+        }
+        // Tiny feet ground the silhouettes when the card is expanded.
         paint.setColor(bodyColor());
         paint.setStyle(Paint.Style.FILL);
-        c.drawOval(new RectF(-35, -30, 35, 37), paint);
-        paint.setColor(Color.rgb(255, 224, 190));
-        c.drawOval(new RectF(-22, 7, 22, 34), paint);
-        paint.setColor(cheekColor());
-        c.drawOval(new RectF(-42, 18, -31, 29), paint);
-        c.drawOval(new RectF(31, 18, 42, 29), paint);
+        c.drawOval(new RectF(-25, 27, -8, 39), paint);
+        c.drawOval(new RectF(8, 27, 25, 39), paint);
+    }
+
+    private void drawBack(Canvas c, float time) {
+        if (variant == 0) {
+            c.save(); c.rotate((float) Math.sin(time * Math.PI * 2) * 7f, 27, 8);
+            Path tail = new Path();
+            tail.moveTo(25, 8); tail.lineTo(38, 1); tail.lineTo(31, -7); tail.lineTo(47, -12);
+            tail.lineTo(40, -20); tail.lineTo(54, -29); tail.lineTo(46, -32); tail.lineTo(53, -45);
+            paint.setColor(Color.rgb(183, 131, 48)); paint.setStrokeWidth(9); paint.setStrokeJoin(Paint.Join.ROUND);
+            paint.setStyle(Paint.Style.STROKE); c.drawPath(tail, paint);
+            paint.setColor(bodyColor()); paint.setStrokeWidth(6); c.drawPath(tail, paint);
+            paint.setStyle(Paint.Style.FILL); c.restore();
+        } else if (variant == 1) {
+            paint.setColor(Color.rgb(130, 82, 56));
+            c.drawOval(new RectF(-34, -17, 35, 33), paint);
+            paint.setColor(Color.rgb(214, 165, 101));
+            c.drawOval(new RectF(-27, -13, 28, 27), paint);
+        } else {
+            paint.setColor(Color.rgb(58, 144, 105));
+            c.drawCircle(0, -34, 23, paint);
+            paint.setColor(Color.rgb(110, 182, 104));
+            c.drawCircle(0, -34, 17, paint);
+        }
     }
 
     private void drawFace(Canvas c, float time) {
-        paint.setColor(Color.rgb(43, 31, 35));
-        boolean blink = mode == IDLE && time > .94f;
+        paint.setColor(variant == 2 ? Color.rgb(205, 49, 65) : Color.rgb(43, 31, 35));
+        boolean blink = time > .94f;
         if (blink) {
             paint.setStrokeWidth(2.8f);
             paint.setStyle(Paint.Style.STROKE);
@@ -134,8 +202,8 @@ final class MascotView extends View {
             c.drawLine(10, 5, 17, 5, paint);
             paint.setStyle(Paint.Style.FILL);
         } else {
-            c.drawOval(new RectF(-18, -1, -10, 10), paint);
-            c.drawOval(new RectF(10, -1, 18, 10), paint);
+            c.drawOval(new RectF(-18, -2, -10, 11), paint);
+            c.drawOval(new RectF(10, -2, 18, 11), paint);
             paint.setColor(Color.WHITE);
             c.drawCircle(-12, 2, 2, paint);
             c.drawCircle(16, 2, 2, paint);
@@ -151,6 +219,25 @@ final class MascotView extends View {
             c.drawArc(new RectF(-5, 13, 6, 24), 20, 140, false, paint);
             paint.setStyle(Paint.Style.FILL);
         }
+    }
+
+    private void drawBulbasaurLeaves(Canvas c, float time) {
+        c.save();
+        c.rotate((float) Math.sin(time * Math.PI * 2) * 7f, 0, -49);
+        paint.setColor(Color.rgb(43, 145, 92));
+        Path leaf = new Path();
+        leaf.moveTo(0, -50); leaf.quadTo(-10, -70, -26, -62); leaf.quadTo(-21, -47, 0, -50); leaf.close(); c.drawPath(leaf, paint);
+        leaf.reset(); leaf.moveTo(0, -50); leaf.quadTo(10, -71, 27, -63); leaf.quadTo(21, -47, 0, -50); leaf.close(); c.drawPath(leaf, paint);
+        paint.setColor(Color.rgb(170, 220, 111));
+        c.drawLine(-4, -52, -22, -63, paint); c.drawLine(4, -52, 22, -63, paint);
+        c.restore();
+    }
+
+    private void drawWaterBubbles(Canvas c, float time) {
+        paint.setColor(Color.argb(210, 174, 239, 255));
+        float rise = (time * 20f) % 18f;
+        c.drawCircle(34, -27 - rise, 3.5f, paint);
+        c.drawCircle(-39, -19 - ((rise + 9f) % 18f), 2.5f, paint);
     }
 
     private void drawNotes(Canvas c, float time) {
