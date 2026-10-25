@@ -3,11 +3,15 @@ package com.codex.nothingisland;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
 import android.os.SystemClock;
 import android.view.View;
+import java.io.IOException;
+import java.io.InputStream;
 
 /** Tiny animated Pokémon companions drawn locally with Canvas; no network or image SDK is used. */
 final class MascotView extends View {
@@ -23,35 +27,71 @@ final class MascotView extends View {
     static final int CALL = 9;
     static final int TORCH = 10;
     static final int PAUSED = 11;
+    static final int BOOKING = 12;
+    static final int DOG_IDLE = 0;
+    static final int DOG_RUN = 1;
+    static final int DOG_SLEEP = 2;
+    static final int DOG_BARK = 3;
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private int mode = IDLE;
     private int variant;
+    private Bitmap spanielSprite;
+    private int dogBehavior = DOG_IDLE;
 
     MascotView(Context context) {
         super(context);
-        setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inSampleSize = 4;
+        try (InputStream input = context.getAssets().open("english-cocker-spaniel.png")) {
+            spanielSprite = BitmapFactory.decodeStream(input, null, options);
+        } catch (IOException ignored) { }
+        setContentDescription(variantName(variant) + " mascot");
     }
 
     void setMode(int next) {
         if (mode != next) {
             mode = next;
+            if (variant == 3) {
+                if (next == DELIVERY) setDogBehavior(DOG_RUN);
+                else if (next == BOOKING || next == EXCITED) setDogBehavior(DOG_BARK);
+                else if (next == SINGING) setDogBehavior(DOG_RUN);
+                else if (next == PAUSED) setDogBehavior(DOG_SLEEP);
+                else setDogBehavior(DOG_IDLE);
+            }
+            invalidate();
+        }
+    }
+
+    void setDogBehavior(int next) {
+        if (dogBehavior != next) {
+            dogBehavior = next;
             invalidate();
         }
     }
 
     void setVariant(int next) {
-        int normalized = Math.max(0, Math.min(2, next));
+        int normalized = Math.max(0, Math.min(3, next));
         if (variant != normalized) {
             variant = normalized;
+            dogBehavior = DOG_IDLE;
+            setContentDescription(variantName(variant) + " mascot");
             invalidate();
         }
+    }
+
+    int getVariant() { return variant; }
+
+    static String variantName(int variant) {
+        String[] names = {"Pikachu", "Squirtle", "Bulbasaur", "English Cocker Spaniel"};
+        return names[Math.max(0, Math.min(names.length - 1, variant))];
     }
 
     private int bodyColor() {
         switch (variant) {
             case 1: return Color.rgb(112, 203, 225); // Squirtle
             case 2: return Color.rgb(111, 190, 139); // Bulbasaur
+            case 3: return Color.rgb(174, 94, 47); // Spaniel coat
             default: return Color.rgb(255, 207, 67); // Pikachu
         }
     }
@@ -74,18 +114,22 @@ final class MascotView extends View {
         canvas.scale(scale, scale);
 
         float time = (SystemClock.uptimeMillis() % 1600L) / 1600f;
-        float bob = (mode == SINGING || mode == EXCITED || mode == DELIVERY)
+        float bob = (mode == SINGING || mode == EXCITED || mode == DELIVERY || mode == BOOKING)
                 ? (float) Math.sin(time * Math.PI * 4) * 3.2f
                 : (float) Math.sin(time * Math.PI * 2) * 1.5f;
         canvas.translate(0f, bob);
 
         if (mode == DELIVERY) drawScooter(canvas, time);
-        drawBack(canvas, time);
-        drawEars(canvas);
-        drawBody(canvas);
-        drawFace(canvas, time);
-        if (variant == 2) drawBulbasaurLeaves(canvas, time);
-        if (variant == 1 && (mode == SINGING || mode == CHARGING || mode == EXCITED)) drawWaterBubbles(canvas, time);
+        if (variant == 3) {
+            drawSpaniel(canvas, time);
+        } else {
+            drawBack(canvas, time);
+            drawEars(canvas);
+            drawBody(canvas);
+            drawFace(canvas, time);
+            if (variant == 2) drawBulbasaurLeaves(canvas, time);
+            if (variant == 1 && (mode == SINGING || mode == CHARGING || mode == EXCITED)) drawWaterBubbles(canvas, time);
+        }
         if (mode == SINGING) drawNotes(canvas, time);
         else if (mode == CHARGING || mode == TORCH) drawSpark(canvas, time);
         else if (mode == TIMER) drawTimer(canvas, time);
@@ -94,9 +138,69 @@ final class MascotView extends View {
         else if (mode == CASTING) drawCastWaves(canvas, time);
         else if (mode == CALL) drawCallIcon(canvas);
         else if (mode == PAUSED) drawPauseIcon(canvas);
+        else if (mode == BOOKING) drawTicketIcon(canvas, time);
 
         canvas.restore();
-        postInvalidateDelayed(mode == IDLE ? 70 : 32);
+        postInvalidateDelayed(mode == IDLE ? 50 : 16);
+    }
+
+    private void drawSpaniel(Canvas canvas, float time) {
+        if (spanielSprite == null) {
+            drawDogFallback(canvas, time);
+            return;
+        }
+        if (dogBehavior == DOG_SLEEP) {
+            canvas.save();
+            canvas.rotate(72f, 0f, 18f);
+            canvas.scale(.74f, .74f, 0f, 18f);
+            canvas.drawBitmap(spanielSprite, null, new RectF(-54f, -56f, 54f, 56f), paint);
+            canvas.restore();
+            paint.setColor(Color.rgb(220, 240, 255));
+            paint.setTextSize(13f);
+            paint.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+            float drift = (time * 9f) % 7f;
+            canvas.drawText("Z", 26f + drift, -28f - drift, paint);
+            canvas.drawText("z", 36f + drift, -35f - drift, paint);
+            return;
+        }
+        float sway = (float) Math.sin(time * Math.PI * 2f) * (dogBehavior == DOG_RUN ? 4f : 1.5f);
+        canvas.save();
+        canvas.rotate(sway, 0f, 34f);
+        RectF destination = new RectF(-54f, -56f, 54f, 56f);
+        canvas.drawBitmap(spanielSprite, null, destination, paint);
+        canvas.restore();
+        if (dogBehavior == DOG_RUN) {
+            paint.setColor(Color.argb(170, 245, 245, 245));
+            paint.setStrokeWidth(2f);
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            canvas.drawLine(-47, 15, -57, 15, paint);
+            canvas.drawLine(-44, 22, -53, 22, paint);
+        } else if (dogBehavior == DOG_BARK) {
+            paint.setColor(Color.rgb(255, 245, 202));
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(2.5f);
+            float pulse = 1f + (float) Math.sin(time * Math.PI * 8f) * .18f;
+            canvas.drawArc(new RectF(35, -27, 51, -11), -55, 105 * pulse, false, paint);
+            canvas.drawArc(new RectF(40, -32, 59, -6), -55, 105 * pulse, false, paint);
+            paint.setStyle(Paint.Style.FILL);
+        }
+    }
+
+    private void drawDogFallback(Canvas c, float time) {
+        paint.setColor(Color.rgb(178, 91, 45));
+        c.drawOval(new RectF(-31, -18, 30, 35), paint);
+        c.drawOval(new RectF(-22, -43, 22, 4), paint);
+        paint.setColor(Color.rgb(238, 223, 204));
+        c.drawOval(new RectF(-15, 5, 15, 32), paint);
+        paint.setColor(Color.rgb(156, 72, 38));
+        c.drawOval(new RectF(-43, -38, -20, 8), paint);
+        c.drawOval(new RectF(20, -38, 43, 8), paint);
+        paint.setColor(Color.rgb(40, 33, 29));
+        c.drawCircle(-9, -22, 3, paint); c.drawCircle(9, -22, 3, paint);
+        paint.setColor(Color.rgb(44, 36, 34));
+        c.drawOval(new RectF(-5, -9, 5, -3), paint);
+        paint.setColor(bodyColor());
+        c.drawOval(new RectF(-22, 28, -9, 39), paint); c.drawOval(new RectF(9, 28, 22, 39), paint);
     }
 
     private void drawEars(Canvas c) {
@@ -311,6 +415,18 @@ final class MascotView extends View {
         paint.setTextSize(19);
         paint.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         c.drawText("♪", 24, -21, paint);
+    }
+
+    private void drawTicketIcon(Canvas c, float time) {
+        paint.setColor(Color.rgb(255, 224, 117));
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(3f);
+        paint.setStrokeCap(Paint.Cap.ROUND);
+        float lift = (float) Math.sin(time * Math.PI * 2) * 2f;
+        c.drawRoundRect(new RectF(23, -34 + lift, 46, -13 + lift), 4, 4, paint);
+        c.drawLine(28, -27 + lift, 41, -27 + lift, paint);
+        c.drawLine(28, -21 + lift, 37, -21 + lift, paint);
+        paint.setStyle(Paint.Style.FILL);
     }
 
     private void drawScooter(Canvas c, float time) {

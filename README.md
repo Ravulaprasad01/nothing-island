@@ -1,12 +1,12 @@
 # nothing-island
 
-An original animated companion for the Nothing Phone (2a), inspired by Dynamic Island and OnePlus Fluid Cloud. The compact 24dp mascot sits in the status-bar slot beside the clock (the position marked in the setup reference) and smoothly expands into a live activity card when tapped.
+An animated companion for the Nothing Phone (2a), inspired by Dynamic Island and OnePlus Fluid Cloud. The compact mascot sits in the status-bar slot beside the clock (the position marked in the setup reference) with no visible background; tap it to expand the activity card.
 
 ## Download the APK
 
 [Download Nothing-Island-debug.apk](Nothing-Island-debug.apk) from this repository. On GitHub, open the file and choose **Download raw file** (or **View raw**) to save it to your phone.
 
-**SHA-256:** `E5CC1F004F9BDBECD177EFE3D15059CF441A982342244138A3C843E49B384014`
+**SHA-256:** `1165C37CE568F94634D4900CC55CD1B8D9546D806B64667CC30E10050B1ABB0C`
 
 This is a debug APK built from this source. It is for direct installation and testing, not a Play Store release. Google Play Protect may scan or warn about a sideloaded APK; this project cannot promise Play Protect or Google Play approval. Keep Play Protect enabled and only install the APK you downloaded from this repository. [Google Play Protect guidance](https://support.google.com/android/answer/2812853?hl=en)
 
@@ -27,11 +27,11 @@ The app cannot show the island until both notification access and display-over-o
 
 ## What it does
 
-- **Pokémon companions:** Choose Pikachu, Squirtle, or Bulbasaur from the picker. Their small animated Canvas drawings react to media, delivery, timers, and other live activities. The picker and previews appear only after you tap **Choose mascot style**.
-- **Tap to expand:** A translucent glass card expands from the compact status-bar mascot with an eased 360 ms transition. Tap again to collapse it.
+- **Companions:** Choose Pikachu, Squirtle, Bulbasaur, or a full-body English Cocker Spaniel cutout based on the supplied reference. The dog sprite is transparent and cycles through a small run, sleep, and visual bark animation along the top status area. It does not play bark audio. Pokémon drawings react to media, delivery, timers, and other live activities. The picker and previews appear after you tap **Choose mascot style**.
+- **Tap to expand:** The background-free 24dp mascot sits inside an accessible 48dp touch target, lowered slightly beside the clock. Tapping expands it into a translucent activity card with an eased 360 ms transition. Android screen readers can read the companion's name and card state; media controls have individual labels. The app does not force spoken announcements.
 - **Music:** The expanded mini player shows available album artwork, track/artist, playback progress, and previous, play/pause, next, and seek controls. Tap the artwork to open the player's own app. The controls work when the active media session supports those actions.
 - **Delivery alerts:** Matching order and delivery notification text triggers a scooter animation. This is a visual reaction to notification text, not live order tracking; some apps or wording may not be recognized.
-- **Notifications:** Notification title and short text appear in the expanded card; tap the text to open that notification's app when Android supplies an action. On the lock screen, the island uses a generic “New notification” message instead of showing the notification content.
+- **Notifications and bookings:** Notification title, expanded text, message lines, and booking confirmations are surfaced in the card. Tap the displayed text to open the source app when Android provides an action. Booking/order detection is based on notification content; the source app must post notifications and Nothing Island must keep notification access enabled. On the lock screen, the island uses a generic “New notification” message.
 - **Charging:** While charging, the mascot shows a charging reaction and battery percentage.
 - **Timers:** Clock/timer notifications are checked both when notification access connects and as new notifications arrive. The listener recognizes countdown chronometers and ongoing Clock notifications that show only a time such as `13:48`, even when the notification does not contain the word “Timer.” A detected countdown expands the island and keeps a live remaining-time card visible until the timer notification clears.
 - **Live activities:** Ongoing notifications can trigger call, hotspot, screen/audio recording, screen casting, and flashlight mascot states. Support depends on Android or the app publishing an ongoing notification that the listener can read.

@@ -69,7 +69,7 @@ public final class MainActivity extends Activity {
         companionHeading.setTypeface(null, android.graphics.Typeface.BOLD);
         root.addView(companionHeading);
 
-        int selectedVariant = Math.max(0, Math.min(2,
+        int selectedVariant = Math.max(0, Math.min(3,
                 getSharedPreferences("settings", MODE_PRIVATE).getInt("mascot_variant", 0)));
         mascotChoiceLabel = new TextView(this);
         mascotChoiceLabel.setText("Current style  ·  " + mascotName(selectedVariant));
@@ -138,13 +138,12 @@ public final class MainActivity extends Activity {
     }
 
     private String mascotName(int index) {
-        String[] names = {"Pikachu", "Squirtle", "Bulbasaur"};
-        return names[Math.max(0, Math.min(names.length - 1, index))];
+        return MascotView.variantName(index);
     }
 
     private void showMascotChooser() {
         int saved = getSharedPreferences("settings", MODE_PRIVATE).getInt("mascot_variant", 0);
-        int[] selected = {Math.max(0, Math.min(2, saved))};
+        int[] selected = {Math.max(0, Math.min(3, saved))};
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setGravity(Gravity.CENTER_HORIZONTAL);
@@ -157,7 +156,7 @@ public final class MainActivity extends Activity {
 
         RadioGroup options = new RadioGroup(this);
         options.setOrientation(RadioGroup.VERTICAL);
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 4; i++) {
             RadioButton option = new RadioButton(this);
             option.setId(200 + i);
             option.setText(mascotName(i));
@@ -166,7 +165,7 @@ public final class MainActivity extends Activity {
         }
         options.check(200 + selected[0]);
         options.setOnCheckedChangeListener((group, checkedId) -> {
-            selected[0] = Math.max(0, Math.min(2, checkedId - 200));
+            selected[0] = Math.max(0, Math.min(3, checkedId - 200));
             preview.setVariant(selected[0]);
             preview.setScaleX(.9f);
             preview.setScaleY(.9f);

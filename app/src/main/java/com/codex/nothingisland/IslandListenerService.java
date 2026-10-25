@@ -6,6 +6,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.app.KeyguardManager;
+import android.animation.ArgbEvaluator;
 import android.animation.ValueAnimator;
 import android.graphics.Color;
 import android.graphics.Bitmap;
@@ -13,9 +14,11 @@ import android.graphics.PixelFormat;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.BatteryManager;
+import android.os.Bundle;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.Parcelable;
 import android.os.SystemClock;
 import android.media.MediaMetadata;
 import android.media.session.MediaController;
@@ -43,6 +46,7 @@ public final class IslandListenerService extends NotificationListenerService {
     private static IslandListenerService instance;
     private WindowManager windowManager;
     private LinearLayout island;
+    private GradientDrawable islandBackground;
     private LinearLayout activityRow;
     private TextView message;
     private LinearLayout mediaControls;
@@ -54,6 +58,8 @@ public final class IslandListenerService extends NotificationListenerService {
     private MascotView mascot;
     private MediaController activeMediaController;
     private boolean seekingMedia;
+    private float cardStrength;
+    private ValueAnimator dogRunAnimator;
     private WindowManager.LayoutParams params;
     private String latestMessage = "";
     private boolean expanded;
@@ -63,21 +69,20 @@ public final class IslandListenerService extends NotificationListenerService {
     private long timerEndElapsed = -1L;
     private long timerFallbackSeconds = -1L;
     private String timerLabel = "Timer";
+    private String timerStatusText = "Timer";
     private android.app.PendingIntent latestNotificationIntent;
     private String latestNotificationKey;
     private final Map<String, LiveActivity> liveActivities = new LinkedHashMap<>();
     private ValueAnimator expansionAnimator;
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private final Runnable clearEvent = () -> {
-        if (currentMode == MascotView.DELIVERY || currentMode == MascotView.EXCITED) {
-            showEvent("Nothing Island", MascotView.IDLE, false);
-            if (expanded) {
-                setExpanded(false);
-                if (windowManager != null && island != null && params != null) {
-                    try { windowManager.updateViewLayout(island, params); } catch (RuntimeException ignored) { }
-                }
-            }
+    private final Runnable dogBehaviorTicker = new Runnable() {
+        @Override public void run() {
+            updateDogBehavior();
+            handler.postDelayed(this, 160L);
         }
+    };
+    private final Runnable clearEvent = () -> {
+        if (currentMode == MascotView.DELIVERY || currentMode == MascotView.BOOKING || currentMode == MascotView.EXCITED) restorePinnedActivity();
         refreshMedia();
     };
     private final Runnable mediaPoll = new Runnable() {
@@ -88,16 +93,22 @@ public final class IslandListenerService extends NotificationListenerService {
     };
     private final Runnable timerTick = new Runnable() {
         @Override public void run() {
-            if (activeTimerKey == null || currentMode != MascotView.TIMER) return;
+            if (activeTimerKey == null) return;
             long remaining = timerEndElapsed > 0
                     ? Math.max(0L, (timerEndElapsed - SystemClock.elapsedRealtime() + 999L) / 1000L)
                     : timerFallbackSeconds;
             if (remaining >= 0) {
-                latestMessage = timerLabel + "  ·  " + formatDuration(remaining);
-                updateIsland();
-                if (remaining == 0 && timerEndElapsed > 0) {
-                    latestMessage = "Timer finished";
+                timerStatusText = timerLabel + "  ·  " + formatDuration(remaining);
+                if (currentMode == MascotView.TIMER) {
+                    latestMessage = timerStatusText;
                     updateIsland();
+                }
+                if (remaining == 0 && timerEndElapsed > 0) {
+                    timerStatusText = "Timer finished";
+                    if (currentMode == MascotView.TIMER) {
+                        latestMessage = timerStatusText;
+                        updateIsland();
+                    }
                     return;
                 }
                 if (timerEndElapsed <= 0 && timerFallbackSeconds > 0) timerFallbackSeconds--;
@@ -105,6 +116,25 @@ public final class IslandListenerService extends NotificationListenerService {
             handler.postDelayed(this, 1000L);
         }
     };
+
+    private void restorePinnedActivity() {
+        if (activeTimerKey != null) {
+            currentMode = MascotView.TIMER;
+            latestMessage = timerStatusText;
+            if (!expanded) setExpanded(true);
+            updateIsland();
+            return;
+        }
+        LiveActivity latest = null;
+        for (LiveActivity activity : liveActivities.values()) latest = activity;
+        if (latest != null) {
+            showEvent(latest.text, latest.mode, false);
+            if (!expanded) setExpanded(true);
+        } else {
+            showEvent("Nothing Island", MascotView.IDLE, false);
+            if (expanded) setExpanded(false);
+        }
+    }
 
     private final BroadcastReceiver batteryReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
@@ -116,7 +146,7 @@ public final class IslandListenerService extends NotificationListenerService {
                     int percent = scale > 0 ? Math.round(level * 100f / scale) : level;
                     if (activeTimerKey == null && liveActivities.isEmpty()
                             && currentMode != MascotView.SINGING && currentMode != MascotView.DELIVERY
-                            && currentMode != MascotView.EXCITED) {
+                            && currentMode != MascotView.BOOKING && currentMode != MascotView.EXCITED) {
                         showEvent("Charging  ·  " + percent + "%", MascotView.CHARGING, false);
                     }
                 } else if (currentMode == MascotView.CHARGING) {
@@ -127,7 +157,12 @@ public final class IslandListenerService extends NotificationListenerService {
     };
 
     static void setMascotVariant(int variant) {
-        if (instance != null && instance.mascot != null) instance.mascot.setVariant(variant);
+        if (instance != null && instance.mascot != null) {
+            instance.stopDogRun();
+            instance.mascot.setVariant(variant);
+            if (instance.island != null) instance.island.setContentDescription(instance.accessibleIslandLabel());
+            instance.handler.post(instance::updateDogBehavior);
+        }
     }
 
     public static void refreshIfRunning() {
@@ -161,6 +196,8 @@ public final class IslandListenerService extends NotificationListenerService {
         });
         handler.removeCallbacks(mediaPoll);
         handler.post(mediaPoll);
+        handler.removeCallbacks(dogBehaviorTicker);
+        handler.post(dogBehaviorTicker);
     }
 
     private void ensureOverlay() {
@@ -172,18 +209,19 @@ public final class IslandListenerService extends NotificationListenerService {
         island.setGravity(Gravity.CENTER);
         island.setOrientation(LinearLayout.VERTICAL);
         island.setPadding(dp(4), dp(4), dp(4), dp(4));
-        GradientDrawable background = new GradientDrawable();
-        background.setColor(Color.argb(160, 13, 15, 18));
-        background.setStroke(dp(1), Color.argb(72, 255, 255, 255));
-        background.setCornerRadius(dp(40));
-        island.setBackground(background);
-        island.setElevation(dp(8));
+        islandBackground = new GradientDrawable();
+        islandBackground.setColor(Color.TRANSPARENT);
+        islandBackground.setStroke(dp(1), Color.TRANSPARENT);
+        islandBackground.setCornerRadius(dp(28));
+        island.setBackground(islandBackground);
+        island.setElevation(0f);
 
         activityRow = new LinearLayout(this);
         activityRow.setGravity(Gravity.CENTER);
         activityRow.setOrientation(LinearLayout.HORIZONTAL);
         mascot = new MascotView(this);
         mascot.setVariant(getSharedPreferences("settings", MODE_PRIVATE).getInt("mascot_variant", 0));
+        mascot.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         activityRow.addView(mascot, new LinearLayout.LayoutParams(dp(24), dp(24)));
 
         albumArt = new ImageView(this);
@@ -221,6 +259,7 @@ public final class IslandListenerService extends NotificationListenerService {
         mediaControls.addView(previousControl);
         seekBar = new SeekBar(this);
         seekBar.setMax(1000);
+        seekBar.setContentDescription("Track progress. Adjust to seek through the song.");
         seekBar.setProgressTintList(android.content.res.ColorStateList.valueOf(Color.rgb(111, 220, 202)));
         seekBar.setThumbTintList(android.content.res.ColorStateList.valueOf(Color.rgb(235, 255, 250)));
         LinearLayout.LayoutParams seekParams = new LinearLayout.LayoutParams(0, dp(40), 1f);
@@ -247,16 +286,20 @@ public final class IslandListenerService extends NotificationListenerService {
             }
         });
         island.addView(mediaControls, new LinearLayout.LayoutParams(-1, dp(48)));
+        island.setFocusable(true);
+        island.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
         island.setOnClickListener(v -> toggleExpanded());
+        island.setContentDescription(accessibleIslandLabel());
 
         params = new WindowManager.LayoutParams(
-                dp(34), dp(32), WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                dp(48), dp(48), WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
                 PixelFormat.TRANSLUCENT);
         params.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
         // Match the Nothing Phone (2a) status-bar timer slot beside the clock, as requested.
         params.x = compactHorizontalOffset();
-        params.y = 0;
+        params.y = dp(6);
         params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
         try {
             windowManager.addView(island, params);
@@ -273,7 +316,68 @@ public final class IslandListenerService extends NotificationListenerService {
         updateIsland();
     }
 
+    private void updateDogBehavior() {
+        if (mascot == null || mascot.getVariant() != 3) {
+            stopDogRun();
+            return;
+        }
+        if (expanded || currentMode != MascotView.IDLE) {
+            stopDogRun();
+            return;
+        }
+        long phase = SystemClock.uptimeMillis() % 10000L;
+        if (phase < 1700L) {
+            mascot.setDogBehavior(MascotView.DOG_RUN);
+            if (dogRunAnimator == null) startDogRun();
+        } else if (phase < 5900L) {
+            stopDogRun();
+            mascot.setDogBehavior(MascotView.DOG_SLEEP);
+        } else if (phase < 7500L) {
+            stopDogRun();
+            mascot.setDogBehavior(MascotView.DOG_BARK);
+        } else {
+            stopDogRun();
+            mascot.setDogBehavior(MascotView.DOG_IDLE);
+        }
+    }
+
+    private void startDogRun() {
+        if (params == null || windowManager == null || island == null) return;
+        int base = compactHorizontalOffset();
+        dogRunAnimator = ValueAnimator.ofInt(base, base + dp(30), base);
+        dogRunAnimator.setDuration(1500L);
+        dogRunAnimator.setInterpolator(new AccelerateDecelerateInterpolator());
+        dogRunAnimator.addUpdateListener(animator -> {
+            if (expanded || params == null || island == null) return;
+            params.x = (int) animator.getAnimatedValue();
+            try { windowManager.updateViewLayout(island, params); } catch (RuntimeException ignored) { }
+        });
+        dogRunAnimator.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(android.animation.Animator animation) {
+                dogRunAnimator = null;
+                if (!expanded && params != null && island != null) {
+                    params.x = compactHorizontalOffset();
+                    try { windowManager.updateViewLayout(island, params); } catch (RuntimeException ignored) { }
+                }
+            }
+        });
+        dogRunAnimator.start();
+    }
+
+    private void stopDogRun() {
+        if (dogRunAnimator != null) {
+            ValueAnimator running = dogRunAnimator;
+            dogRunAnimator = null;
+            running.cancel();
+        }
+        if (!expanded && params != null && island != null && params.x != compactHorizontalOffset()) {
+            params.x = compactHorizontalOffset();
+            try { windowManager.updateViewLayout(island, params); } catch (RuntimeException ignored) { }
+        }
+    }
+
     private void setExpanded(boolean value) {
+        if (value) stopDogRun();
         expanded = value;
         if (params == null || mascot == null || message == null) return;
         if (expansionAnimator != null) expansionAnimator.cancel();
@@ -287,6 +391,7 @@ public final class IslandListenerService extends NotificationListenerService {
         activityRow.setGravity(expanded ? (Gravity.CENTER_VERTICAL | Gravity.START) : Gravity.CENTER);
         if (mediaControls != null) mediaControls.setVisibility(expanded && hasMediaActivity() ? View.VISIBLE : View.GONE);
         if (albumArt != null) albumArt.setVisibility(expanded && hasMediaActivity() ? View.VISIBLE : View.GONE);
+        island.setContentDescription(accessibleIslandLabel());
         int startWidth = params.width;
         int startHeight = params.height;
         int startX = params.x;
@@ -296,15 +401,18 @@ public final class IslandListenerService extends NotificationListenerService {
         int startPadRight = island.getPaddingRight();
         int startPadV = island.getPaddingTop();
         int startMessagePad = message.getPaddingLeft();
-        int endWidth = dp(expanded ? (hasMediaActivity() ? 370 : 340) : 34);
-        int endHeight = dp(expanded ? (hasMediaActivity() ? 142 : 100) : 32);
+        int endWidth = dp(expanded ? (hasMediaActivity() ? 370 : 340) : 48);
+        int endHeight = dp(expanded ? (hasMediaActivity() ? 142 : 100) : 48);
         int endX = expanded ? 0 : compactHorizontalOffset();
-        int endY = dp(expanded ? 18 : 0);
+        int endY = dp(expanded ? 28 : 6);
         int endMascot = dp(expanded ? 52 : 24);
         int endPadH = dp(expanded ? 14 : 4);
         int endPadRight = dp(expanded ? 14 : 4);
         int endPadV = dp(expanded ? 10 : 4);
         int endMessagePad = dp(expanded ? 10 : 0);
+        float startStrength = cardStrength;
+        float endStrength = expanded ? 1f : 0f;
+        ArgbEvaluator colorEvaluator = new ArgbEvaluator();
         expansionAnimator = ValueAnimator.ofFloat(0f, 1f);
         expansionAnimator.setDuration(360);
         expansionAnimator.setInterpolator(new AccelerateDecelerateInterpolator());
@@ -322,6 +430,11 @@ public final class IslandListenerService extends NotificationListenerService {
             int padV = blend(startPadV, endPadV, f);
             island.setPadding(padH, padV, blend(startPadRight, endPadRight, f), padV);
             message.setPadding(blend(startMessagePad, endMessagePad, f), 0, 0, 0);
+            cardStrength = startStrength + (endStrength - startStrength) * f;
+            islandBackground.setColor((int) colorEvaluator.evaluate(cardStrength, Color.TRANSPARENT,
+                    Color.argb(150, 12, 14, 18)));
+            islandBackground.setStroke(dp(1), Color.argb(Math.round(72 * cardStrength), 255, 255, 255));
+            island.setElevation(dp(8 * cardStrength));
             try { windowManager.updateViewLayout(island, params); } catch (RuntimeException ignored) { }
         });
         expansionAnimator.addListener(new android.animation.AnimatorListenerAdapter() {
@@ -344,6 +457,13 @@ public final class IslandListenerService extends NotificationListenerService {
         return targetCenter - width / 2;
     }
 
+    private String accessibleIslandLabel() {
+        int variant = getSharedPreferences("settings", MODE_PRIVATE).getInt("mascot_variant", 0);
+        String state = expanded ? "expanded" : "collapsed";
+        return MascotView.variantName(variant) + " companion, " + state + ". Double tap to "
+                + (expanded ? "close" : "open") + " activity card.";
+    }
+
     private TextView mediaButton(String label, String description) {
         TextView button = new TextView(this);
         button.setText(label);
@@ -358,7 +478,7 @@ public final class IslandListenerService extends NotificationListenerService {
         button.setBackground(shape);
         button.setClickable(true);
         button.setFocusable(true);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(44), dp(44));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(48), dp(48));
         lp.setMargins(dp(2), 0, dp(2), 0);
         button.setLayoutParams(lp);
         return button;
@@ -410,6 +530,7 @@ public final class IslandListenerService extends NotificationListenerService {
     }
 
     private void showEvent(String text, int mode, boolean temporary) {
+        if (mode != MascotView.IDLE) stopDogRun();
         currentMode = mode;
         if (mascot != null) mascot.setMode(mode);
         if (temporary && mode != MascotView.CHARGING && !expanded) setExpanded(true);
@@ -423,8 +544,7 @@ public final class IslandListenerService extends NotificationListenerService {
         Notification notification = sbn == null ? null : sbn.getNotification();
         if (notification == null || notification.extras == null || !isTimerNotification(sbn, notification)) return false;
         CharSequence title = notification.extras.getCharSequence(Notification.EXTRA_TITLE);
-        CharSequence text = notification.extras.getCharSequence(Notification.EXTRA_TEXT);
-        String combined = join(title, text);
+        String combined = notificationSummary(notification);
         latestNotificationIntent = notification.contentIntent;
         latestNotificationKey = sbn.getKey();
         String titleText = title == null ? "" : title.toString().trim();
@@ -450,6 +570,10 @@ public final class IslandListenerService extends NotificationListenerService {
         }
         if (timerEndElapsed < 0 && !chronometer && timerFallbackSeconds < 0) return false;
         currentMode = MascotView.TIMER;
+        timerStatusText = timerEndElapsed > 0
+                ? timerLabel + "  ·  " + formatDuration(Math.max(0L, (timerEndElapsed - nowElapsed + 999L) / 1000L))
+                : timerFallbackSeconds >= 0 ? timerLabel + "  ·  " + formatDuration(timerFallbackSeconds) : "Timer active";
+        latestMessage = timerStatusText;
         if (mascot != null) mascot.setMode(MascotView.TIMER);
         if (!expanded) setExpanded(true);
         handler.removeCallbacks(clearEvent);
@@ -461,15 +585,13 @@ public final class IslandListenerService extends NotificationListenerService {
     private boolean isTimerNotification(StatusBarNotification sbn, Notification notification) {
         String pkg = sbn.getPackageName() == null ? "" : sbn.getPackageName().toLowerCase(Locale.ROOT);
         String channel = notification.getChannelId() == null ? "" : notification.getChannelId().toLowerCase(Locale.ROOT);
-        CharSequence title = notification.extras.getCharSequence(Notification.EXTRA_TITLE);
-        CharSequence text = notification.extras.getCharSequence(Notification.EXTRA_TEXT);
-        String words = (join(title, text) + " " + channel).toLowerCase(Locale.ROOT);
+        String words = (notificationSummary(notification) + " " + channel).toLowerCase(Locale.ROOT);
         boolean clockApp = pkg.contains("deskclock") || pkg.contains("clock") || pkg.contains("clockpackage");
         boolean timerWords = words.contains("timer") || words.contains("countdown") || words.contains("time left")
                 || words.contains("remaining") || words.contains("will ring in");
         boolean chronometer = notification.extras.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER, false);
         boolean countDown = notification.extras.getBoolean(Notification.EXTRA_CHRONOMETER_COUNT_DOWN, false);
-        boolean hasDuration = parseDurationSeconds(join(title, text)) >= 0;
+        boolean hasDuration = parseDurationSeconds(notificationSummary(notification)) >= 0;
         // Some Nothing/Google Clock builds publish only an ongoing countdown (e.g. "13:48") and no "Timer" label.
         return (clockApp && (timerWords || channel.contains("timer") || (chronometer && countDown)
                     || (sbn.isOngoing() && hasDuration)))
@@ -533,6 +655,7 @@ public final class IslandListenerService extends NotificationListenerService {
     private void updateIsland() {
         if (message == null || island == null) return;
         message.setText(expanded ? (latestMessage.isEmpty() ? "Nothing Island" : latestMessage) : compactText(latestMessage));
+        island.setContentDescription(accessibleIslandLabel());
         if (mediaControls != null) mediaControls.setVisibility(expanded && hasMediaActivity() ? View.VISIBLE : View.GONE);
         if (albumArt != null) albumArt.setVisibility(expanded && hasMediaActivity() ? View.VISIBLE : View.GONE);
         if (playPauseControl != null && activeMediaController != null) {
@@ -545,7 +668,7 @@ public final class IslandListenerService extends NotificationListenerService {
     private void refreshMedia() {
         if (island == null) return;
         if (activeTimerKey != null || !liveActivities.isEmpty()) return;
-        if (currentMode == MascotView.DELIVERY || currentMode == MascotView.EXCITED) return;
+        if (currentMode == MascotView.DELIVERY || currentMode == MascotView.BOOKING || currentMode == MascotView.EXCITED) return;
         try {
             MediaSessionManager manager = (MediaSessionManager) getSystemService(MEDIA_SESSION_SERVICE);
             List<MediaController> controllers = manager.getActiveSessions(new android.content.ComponentName(this, IslandListenerService.class));
@@ -610,6 +733,62 @@ public final class IslandListenerService extends NotificationListenerService {
         return deliveryStatus || (deliveryApp && (value.contains("order") || value.contains("deliver")));
     }
 
+    private boolean looksLikeBooking(String packageName, String content) {
+        String value = ((packageName == null ? "" : packageName) + " " + (content == null ? "" : content))
+                .toLowerCase(Locale.ROOT);
+        boolean bookingTerm = value.contains("booking") || value.contains("booked") || value.contains("reservation") || value.contains("ticket")
+                || value.contains("itinerary") || value.contains("boarding pass") || value.contains("seat reserved")
+                || value.contains("check-in") || value.contains("check in") || value.contains("ride")
+                || value.contains("flight") || value.contains("hotel") || value.contains("table reservation")
+                || value.contains("appointment");
+        boolean confirmation = value.contains("confirmed") || value.contains("booked") || value.contains("successful")
+                || value.contains("ready") || value.contains("cancelled") || value.contains("canceled")
+                || value.contains("booking id") || value.contains("reservation id");
+        boolean bookingApp = value.contains("bookmyshow") || value.contains("irctc") || value.contains("makemytrip")
+                || value.contains("redbus") || value.contains("goibibo") || value.contains("cleartrip")
+                || value.contains("easemytrip") || value.contains("booking.com") || value.contains("airbnb")
+                || value.contains("pvr") || value.contains("paytm travel");
+        return bookingTerm && (confirmation || bookingApp);
+    }
+
+    private String notificationSummary(Notification notification) {
+        if (notification == null || notification.extras == null) return "";
+        Bundle extras = notification.extras;
+        CharSequence title = extras.getCharSequence(Notification.EXTRA_TITLE);
+        if (title == null) title = extras.getCharSequence(Notification.EXTRA_TITLE_BIG);
+        CharSequence body = extras.getCharSequence(Notification.EXTRA_BIG_TEXT);
+        if (body == null) body = extras.getCharSequence(Notification.EXTRA_TEXT);
+        StringBuilder summary = new StringBuilder(join(title, body));
+        CharSequence subText = extras.getCharSequence(Notification.EXTRA_SUB_TEXT);
+        appendUnique(summary, subText);
+        CharSequence[] lines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES);
+        if (lines != null) for (CharSequence line : lines) appendUnique(summary, line);
+        Parcelable[] messages = extras.getParcelableArray(Notification.EXTRA_MESSAGES);
+        if (messages != null) for (Parcelable parcelable : messages) {
+            if (parcelable instanceof Bundle) appendUnique(summary, ((Bundle) parcelable).getCharSequence("text"));
+        }
+        String value = summary.toString().trim();
+        return value.length() > 280 ? value.substring(0, 277) + "…" : value;
+    }
+
+    private void appendUnique(StringBuilder target, CharSequence addition) {
+        if (addition == null) return;
+        String value = addition.toString().trim();
+        if (value.isEmpty() || target.indexOf(value) >= 0) return;
+        if (target.length() > 0) target.append("  ·  ");
+        target.append(value);
+    }
+
+    private String appLabel(String packageName) {
+        if (packageName == null) return "Notification";
+        try {
+            android.content.pm.ApplicationInfo info = getPackageManager().getApplicationInfo(packageName, 0);
+            CharSequence label = getPackageManager().getApplicationLabel(info);
+            if (label != null && !label.toString().trim().isEmpty()) return label.toString();
+        } catch (android.content.pm.PackageManager.NameNotFoundException ignored) { }
+        return "Notification";
+    }
+
     private String compactText(String text) {
         if (text == null || text.isEmpty()) return "Nothing Island";
         return text.length() > 25 ? text.substring(0, 24) + "…" : text;
@@ -618,34 +797,31 @@ public final class IslandListenerService extends NotificationListenerService {
     @Override public void onNotificationPosted(StatusBarNotification sbn) {
         super.onNotificationPosted(sbn);
         if (updateTimerFromNotification(sbn)) return;
-        // Keep an active countdown pinned while unrelated notifications arrive.
-        if (activeTimerKey != null) return;
         LiveActivity activity = classifyLiveActivity(sbn);
         if (activity != null && sbn.isOngoing()) {
             liveActivities.put(sbn.getKey(), activity);
             latestNotificationIntent = sbn.getNotification().contentIntent;
             latestNotificationKey = sbn.getKey();
-            if (!expanded) setExpanded(true);
-            showEvent(activity.text, activity.mode, false);
+            if (activeTimerKey == null) {
+                if (!expanded) setExpanded(true);
+                showEvent(activity.text, activity.mode, false);
+            }
             return;
         }
-        if (!liveActivities.isEmpty()) return;
+        Notification notification = sbn == null ? null : sbn.getNotification();
+        if (notification == null) return;
+        latestNotificationIntent = notification.contentIntent;
+        latestNotificationKey = sbn.getKey();
         KeyguardManager keyguard = (KeyguardManager) getSystemService(KEYGUARD_SERVICE);
         if (keyguard != null && keyguard.isKeyguardLocked()) {
             showEvent("New notification", MascotView.EXCITED, true);
             return;
         }
-        Notification notification = sbn.getNotification();
-        if (notification == null || notification.extras == null) return;
-        latestNotificationIntent = notification.contentIntent;
-        latestNotificationKey = sbn.getKey();
-        CharSequence title = notification.extras.getCharSequence(Notification.EXTRA_TITLE);
-        CharSequence text = notification.extras.getCharSequence(Notification.EXTRA_TEXT);
-        String content = join(title, text);
-        if (!content.isEmpty()) {
-            if (looksLikeDelivery(sbn.getPackageName(), content)) showEvent("🛵  " + content, MascotView.DELIVERY, true);
-            else showEvent(content, MascotView.EXCITED, true);
-        }
+        String content = notificationSummary(notification);
+        if (content.isEmpty()) content = appLabel(sbn.getPackageName()) + " notification";
+        if (looksLikeBooking(sbn.getPackageName(), content)) showEvent("🎟️  " + content, MascotView.BOOKING, true);
+        else if (looksLikeDelivery(sbn.getPackageName(), content)) showEvent("🛵  " + content, MascotView.DELIVERY, true);
+        else showEvent(content, MascotView.EXCITED, true);
     }
 
     private String join(CharSequence title, CharSequence text) {
@@ -680,14 +856,7 @@ public final class IslandListenerService extends NotificationListenerService {
             timerEndElapsed = -1L;
             timerFallbackSeconds = -1L;
             handler.removeCallbacks(timerTick);
-            LiveActivity next = null;
-            for (LiveActivity item : liveActivities.values()) next = item;
-            if (next != null) {
-                showEvent(next.text, next.mode, false);
-            } else {
-                showEvent("Nothing Island", MascotView.IDLE, false);
-                if (expanded) setExpanded(false);
-            }
+            if (currentMode == MascotView.TIMER) restorePinnedActivity();
         }
     }
 
@@ -697,6 +866,7 @@ public final class IslandListenerService extends NotificationListenerService {
         expansionAnimator = null;
         handler.removeCallbacks(mediaPoll);
         handler.removeCallbacks(timerTick);
+        handler.removeCallbacks(dogBehaviorTicker);
         handler.removeCallbacks(clearEvent);
         instance = null;
         if (receiverRegistered) {
@@ -712,6 +882,7 @@ public final class IslandListenerService extends NotificationListenerService {
         expansionAnimator = null;
         handler.removeCallbacks(mediaPoll);
         handler.removeCallbacks(timerTick);
+        handler.removeCallbacks(dogBehaviorTicker);
         handler.removeCallbacks(clearEvent);
         instance = null;
         if (receiverRegistered) {
@@ -722,6 +893,7 @@ public final class IslandListenerService extends NotificationListenerService {
     }
 
     private void removeOverlay() {
+        stopDogRun();
         if (island != null && windowManager != null) {
             try { windowManager.removeView(island); } catch (RuntimeException ignored) { }
         }
