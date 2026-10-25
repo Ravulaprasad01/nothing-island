@@ -1,12 +1,12 @@
 # nothing-island
 
-An original pocket creature for the Nothing Phone (2a), inspired by Dynamic Island. The small mascot rests beside the centered punch-hole camera. Tap it to open a wider card below the camera, between the status area and the rest of the screen.
+An original animated companion for the Nothing Phone (2a), inspired by Dynamic Island and OnePlus Fluid Cloud. The translucent compact island is centered over the punch-hole camera and smoothly expands into a live activity card when tapped.
 
 ## Download the APK
 
 [Download Nothing-Island-debug.apk](Nothing-Island-debug.apk) from this repository. On GitHub, open the file and choose **Download raw file** (or **View raw**) to save it to your phone.
 
-**SHA-256:** `8DA88342FF9D80CF874574785A0D490AF59E1D90E9D0061637696087A712AA1E`
+**SHA-256:** `EBBBC73D2A814EBFB0E692685C93837DDC62B8B454E32B9FADC33346513DC9C1`
 
 This is a debug APK built from this source. It is for direct installation and testing, not a Play Store release. Google Play Protect may scan or warn about a sideloaded APK; this project cannot promise Play Protect or Google Play approval. Keep Play Protect enabled and only install the APK you downloaded from this repository. [Google Play Protect guidance](https://support.google.com/android/answer/2812853?hl=en)
 
@@ -19,7 +19,7 @@ This is a debug APK built from this source. It is for direct installation and te
 5. After installation, open **Nothing Island**.
 6. Read the in-app disclosure. Check the notification-access consent box and tap **Enable notification access**. Android Settings opens; select **Nothing Island** and allow notification access. Return to the app.
 7. Check the separate overlay consent box and tap **Allow display over other apps**. In Android Settings, allow Nothing Island to display over other apps. Return to the app.
-8. Tap **Enable / refresh island**. The mascot appears just to the right of the camera cutout. Tap it to expand or collapse the card.
+8. Tap **Enable / refresh island**. The compact pill appears centered over the camera cutout. Tap it to expand or collapse the card.
 
 To update an earlier installation, download and open the new APK. Android should offer **Update**. If it reports a signature conflict, uninstall the older build first, then install the new APK; uninstalling clears that app's local settings.
 
@@ -27,13 +27,14 @@ The app cannot show the island until both notification access and display-over-o
 
 ## What it does
 
-- **Mascot:** A small, original animated creature sits beside the centered camera cutout. It is not a Pokémon character or asset.
-- **Tap to expand:** A smooth transition opens a wider card below the camera; tap again to collapse it.
-- **Music:** When Android reports an active playing media session, the mascot bobs and sings visually, with the current track/artist available in the expanded card. It does not sing audio or lyrics and does not control the music player.
+- **Mascots:** Choose between four original animated color styles from the mascot picker. The picker and animated previews appear when you tap **Choose mascot style**. These are original characters, not Pokémon characters or assets.
+- **Tap to expand:** A translucent glass capsule expands from the camera cutout with an eased 360 ms transition. Tap again to collapse it.
+- **Music:** The island follows Android media sessions and shows the current track/artist. Tap the previous, play/pause, or next controls to send that action to the active player. The mascot animates to playback state; it does not generate audio or lyrics.
 - **Delivery alerts:** Matching order and delivery notification text triggers a scooter animation. This is a visual reaction to notification text, not live order tracking; some apps or wording may not be recognized.
 - **Notifications:** Notification title and short text appear in the expanded card. On the lock screen, the island uses a generic “New notification” message instead of showing the notification content.
 - **Charging:** While charging, the mascot shows a charging reaction and battery percentage.
-- **Timers:** Clock/timer notifications are checked both when notification access connects and as new notifications arrive. A detected countdown expands the island and shows the remaining time; the card stays visible until the timer notification is dismissed. Timer display depends on the Clock app publishing a readable timer notification with a countdown or remaining-time value. Make sure Nothing Island's notification access remains enabled.
+- **Timers:** Clock/timer notifications are checked both when notification access connects and as new notifications arrive. The listener recognizes countdown chronometers and ongoing Clock notifications that show only a time such as `13:48`, even when the notification does not contain the word “Timer.” A detected countdown expands the island and keeps a live remaining-time card visible until the timer notification clears.
+- **Live activities:** Ongoing notifications can trigger call, hotspot, screen/audio recording, screen casting, and flashlight mascot states. Support depends on Android or the app publishing an ongoing notification that the listener can read.
 
 ## Privacy and permissions
 
@@ -50,7 +51,7 @@ Nothing Island uses Android's notification-listener access to read notification 
 - This is an overlay app; it does not modify Nothing OS or become a native system feature.
 - Music animation follows Android media-session playback state, not the audio waveform.
 - Delivery detection relies on simple notification text and known app names; it may miss orders or misclassify messages.
-- Timer detection relies on the Clock app's notification metadata/text. Clock implementations that hide the active timer from notifications cannot be detected by a third-party listener.
+- Timer detection relies on the Clock app publishing its active timer as a notification. Clock implementations that hide the timer from notifications cannot be detected by a third-party listener.
 - The debug APK may produce a Play Protect warning because it is sideloaded and not Play Store-reviewed.
 
 ## Build from source

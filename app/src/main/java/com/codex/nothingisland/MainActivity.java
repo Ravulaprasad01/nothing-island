@@ -24,6 +24,7 @@ public final class MainActivity extends Activity {
     private TextView status;
     private CheckBox notificationConsent;
     private CheckBox overlayConsent;
+    private TextView mascotChoiceLabel;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -68,40 +69,16 @@ public final class MainActivity extends Activity {
         companionHeading.setTypeface(null, android.graphics.Typeface.BOLD);
         root.addView(companionHeading);
 
-        LinearLayout previewRow = new LinearLayout(this);
-        previewRow.setGravity(Gravity.CENTER_VERTICAL);
-        previewRow.setPadding(0, dp(8), 0, dp(8));
-        MascotView preview = new MascotView(this);
         int selectedVariant = getSharedPreferences("settings", MODE_PRIVATE).getInt("mascot_variant", 0);
-        preview.setVariant(selectedVariant);
-        preview.setMode(MascotView.EXCITED);
-        previewRow.addView(preview, new LinearLayout.LayoutParams(dp(64), dp(64)));
-        TextView companionHint = new TextView(this);
-        companionHint.setText("Four original styles. Change yours any time.");
-        companionHint.setTextColor(Color.DKGRAY);
-        companionHint.setTextSize(14);
-        companionHint.setPadding(dp(12), 0, 0, 0);
-        previewRow.addView(companionHint);
-        root.addView(previewRow);
-
-        RadioGroup mascotChoices = new RadioGroup(this);
-        mascotChoices.setOrientation(RadioGroup.VERTICAL);
-        String[] names = {"Pip · Ember", "Bubbles · Tide", "Moss · Sprout", "Mochi · Dusk"};
-        for (int i = 0; i < names.length; i++) {
-            RadioButton choice = new RadioButton(this);
-            choice.setId(100 + i);
-            choice.setText(names[i]);
-            choice.setTextSize(15);
-            mascotChoices.addView(choice);
-        }
-        mascotChoices.check(100 + Math.max(0, Math.min(3, selectedVariant)));
-        mascotChoices.setOnCheckedChangeListener((group, checkedId) -> {
-            int variant = Math.max(0, Math.min(3, checkedId - 100));
-            getSharedPreferences("settings", MODE_PRIVATE).edit().putInt("mascot_variant", variant).apply();
-            preview.setVariant(variant);
-            IslandListenerService.setMascotVariant(variant);
-        });
-        root.addView(mascotChoices);
+        mascotChoiceLabel = new TextView(this);
+        mascotChoiceLabel.setText("Current style  ·  " + mascotName(selectedVariant));
+        mascotChoiceLabel.setTextColor(Color.DKGRAY);
+        mascotChoiceLabel.setTextSize(14);
+        mascotChoiceLabel.setPadding(0, dp(8), 0, dp(4));
+        root.addView(mascotChoiceLabel);
+        Button chooseMascot = button("Choose mascot style");
+        chooseMascot.setOnClickListener(v -> showMascotChooser());
+        root.addView(chooseMascot);
 
         TextView privacy = new TextView(this);
         privacy.setText("Privacy: notification text and active media metadata are handled on this phone. No internet permission or analytics. Notification and overlay access are separately requested and can be revoked in Android Settings.");
@@ -157,6 +134,55 @@ public final class MainActivity extends Activity {
         button.setText(label);
         button.setAllCaps(false);
         return button;
+    }
+
+    private String mascotName(int index) {
+        String[] names = {"Pip · Ember", "Bubbles · Tide", "Moss · Sprout", "Mochi · Dusk"};
+        return names[Math.max(0, Math.min(names.length - 1, index))];
+    }
+
+    private void showMascotChooser() {
+        int saved = getSharedPreferences("settings", MODE_PRIVATE).getInt("mascot_variant", 0);
+        int[] selected = {Math.max(0, Math.min(3, saved))};
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setGravity(Gravity.CENTER_HORIZONTAL);
+        panel.setPadding(dp(20), dp(12), dp(20), dp(8));
+
+        MascotView preview = new MascotView(this);
+        preview.setVariant(selected[0]);
+        preview.setMode(MascotView.EXCITED);
+        panel.addView(preview, new LinearLayout.LayoutParams(dp(104), dp(104)));
+
+        RadioGroup options = new RadioGroup(this);
+        options.setOrientation(RadioGroup.VERTICAL);
+        for (int i = 0; i < 4; i++) {
+            RadioButton option = new RadioButton(this);
+            option.setId(200 + i);
+            option.setText(mascotName(i));
+            option.setTextSize(16);
+            options.addView(option);
+        }
+        options.check(200 + selected[0]);
+        options.setOnCheckedChangeListener((group, checkedId) -> {
+            selected[0] = Math.max(0, Math.min(3, checkedId - 200));
+            preview.setVariant(selected[0]);
+            preview.setScaleX(.9f);
+            preview.setScaleY(.9f);
+            preview.animate().scaleX(1f).scaleY(1f).setDuration(220).start();
+        });
+        panel.addView(options);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Pick your island companion")
+                .setView(panel)
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Use this mascot", (dialog, which) -> {
+                    getSharedPreferences("settings", MODE_PRIVATE).edit().putInt("mascot_variant", selected[0]).apply();
+                    mascotChoiceLabel.setText("Current style  ·  " + mascotName(selected[0]));
+                    IslandListenerService.setMascotVariant(selected[0]);
+                })
+                .show();
     }
 
     private void showPrivacyDetails() {

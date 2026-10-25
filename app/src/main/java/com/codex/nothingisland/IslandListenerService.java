@@ -31,6 +31,8 @@ import android.widget.TextView;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -39,7 +41,10 @@ public final class IslandListenerService extends NotificationListenerService {
     private WindowManager windowManager;
     private LinearLayout island;
     private TextView message;
+    private LinearLayout mediaControls;
+    private TextView playPauseControl;
     private MascotView mascot;
+    private MediaController activeMediaController;
     private WindowManager.LayoutParams params;
     private String latestMessage = "";
     private boolean expanded;
@@ -49,6 +54,7 @@ public final class IslandListenerService extends NotificationListenerService {
     private long timerEndElapsed = -1L;
     private long timerFallbackSeconds = -1L;
     private String timerLabel = "Timer";
+    private final Map<String, LiveActivity> liveActivities = new LinkedHashMap<>();
     private ValueAnimator expansionAnimator;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable clearEvent = () -> {
@@ -97,7 +103,8 @@ public final class IslandListenerService extends NotificationListenerService {
                 int scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, 100);
                 if (status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL) {
                     int percent = scale > 0 ? Math.round(level * 100f / scale) : level;
-                    if (currentMode != MascotView.SINGING && currentMode != MascotView.DELIVERY
+                    if (activeTimerKey == null && liveActivities.isEmpty()
+                            && currentMode != MascotView.SINGING && currentMode != MascotView.DELIVERY
                             && currentMode != MascotView.EXCITED) {
                         showEvent("Charging  ·  " + percent + "%", MascotView.CHARGING, false);
                     }
@@ -132,6 +139,12 @@ public final class IslandListenerService extends NotificationListenerService {
                 StatusBarNotification[] active = getActiveNotifications();
                 if (active != null) for (StatusBarNotification notification : active) {
                     if (updateTimerFromNotification(notification)) break;
+                    LiveActivity activity = classifyLiveActivity(notification);
+                    if (activity != null && notification.isOngoing()) {
+                        liveActivities.put(notification.getKey(), activity);
+                        if (!expanded) setExpanded(true);
+                        showEvent(activity.text, activity.mode, false);
+                    }
                 }
             } catch (RuntimeException ignored) { }
         });
@@ -147,12 +160,14 @@ public final class IslandListenerService extends NotificationListenerService {
         island = new LinearLayout(this);
         island.setGravity(Gravity.CENTER);
         island.setOrientation(LinearLayout.HORIZONTAL);
-        island.setGravity(Gravity.CENTER_VERTICAL);
-        island.setPadding(dp(6), dp(7), dp(6), dp(7));
+        island.setGravity(Gravity.CENTER);
+        island.setPadding(dp(8), dp(6), dp(8), dp(6));
         GradientDrawable background = new GradientDrawable();
-        background.setColor(Color.BLACK);
+        background.setColor(Color.argb(216, 13, 15, 18));
+        background.setStroke(dp(1), Color.argb(40, 255, 255, 255));
         background.setCornerRadius(dp(40));
         island.setBackground(background);
+        island.setElevation(dp(8));
 
         mascot = new MascotView(this);
         mascot.setVariant(getSharedPreferences("settings", MODE_PRIVATE).getInt("mascot_variant", 0));
@@ -167,15 +182,31 @@ public final class IslandListenerService extends NotificationListenerService {
         message.setPadding(dp(8), 0, 0, 0);
         message.setVisibility(View.GONE);
         island.addView(message, new LinearLayout.LayoutParams(0, -2, 1f));
+        mediaControls = new LinearLayout(this);
+        mediaControls.setGravity(Gravity.CENTER);
+        mediaControls.setOrientation(LinearLayout.HORIZONTAL);
+        mediaControls.setVisibility(View.GONE);
+        TextView previous = mediaButton("‹‹", "Previous track");
+        playPauseControl = mediaButton("Ⅱ", "Play or pause");
+        TextView next = mediaButton("››", "Next track");
+        mediaControls.addView(previous);
+        mediaControls.addView(playPauseControl);
+        mediaControls.addView(next);
+        previous.setOnClickListener(v -> controlMedia(PlaybackState.ACTION_SKIP_TO_PREVIOUS));
+        playPauseControl.setOnClickListener(v -> toggleMediaPlayback());
+        next.setOnClickListener(v -> controlMedia(PlaybackState.ACTION_SKIP_TO_NEXT));
+        island.addView(mediaControls, new LinearLayout.LayoutParams(-2, dp(42)));
         island.setOnClickListener(v -> toggleExpanded());
 
         params = new WindowManager.LayoutParams(
-                dp(52), dp(44), WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                dp(104), dp(46), WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT);
         params.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
-        params.x = dp(42);
-        params.y = dp(5);
+        // Nothing Phone (2a) has a centered punch-hole. Keep the compact pill centered on it.
+        params.x = 0;
+        params.y = 0;
+        params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
         try {
             windowManager.addView(island, params);
             updateIsland();
@@ -197,10 +228,12 @@ public final class IslandListenerService extends NotificationListenerService {
         if (expansionAnimator != null) expansionAnimator.cancel();
         if (expanded) {
             message.setVisibility(View.VISIBLE);
-            message.setMaxLines(4);
+            message.setMaxLines(3);
         } else {
             message.setMaxLines(1);
         }
+        island.setGravity(expanded ? (Gravity.CENTER_VERTICAL | Gravity.START) : Gravity.CENTER);
+        if (mediaControls != null) mediaControls.setVisibility(expanded && hasMediaActivity() ? View.VISIBLE : View.GONE);
         int startWidth = params.width;
         int startHeight = params.height;
         int startX = params.x;
@@ -210,17 +243,17 @@ public final class IslandListenerService extends NotificationListenerService {
         int startPadRight = island.getPaddingRight();
         int startPadV = island.getPaddingTop();
         int startMessagePad = message.getPaddingLeft();
-        int endWidth = dp(expanded ? 340 : 52);
-        int endHeight = dp(expanded ? 128 : 44);
-        int endX = dp(expanded ? 0 : 42);
-        int endY = dp(expanded ? 48 : 5);
-        int endMascot = dp(expanded ? 94 : 30);
-        int endPadH = dp(expanded ? 14 : 6);
-        int endPadRight = dp(expanded ? 16 : 6);
-        int endPadV = dp(expanded ? 14 : 7);
-        int endMessagePad = dp(expanded ? 12 : 0);
+        int endWidth = dp(expanded ? (activeMediaController == null ? 340 : 370) : 104);
+        int endHeight = dp(expanded ? (activeMediaController == null ? 100 : 118) : 46);
+        int endX = 0;
+        int endY = 0;
+        int endMascot = dp(expanded ? 64 : 30);
+        int endPadH = dp(expanded ? 14 : 8);
+        int endPadRight = dp(expanded ? 14 : 8);
+        int endPadV = dp(expanded ? 10 : 6);
+        int endMessagePad = dp(expanded ? 10 : 0);
         expansionAnimator = ValueAnimator.ofFloat(0f, 1f);
-        expansionAnimator.setDuration(280);
+        expansionAnimator.setDuration(360);
         expansionAnimator.setInterpolator(new AccelerateDecelerateInterpolator());
         expansionAnimator.addUpdateListener(animator -> {
             float f = (float) animator.getAnimatedValue();
@@ -252,6 +285,48 @@ public final class IslandListenerService extends NotificationListenerService {
         return start + Math.round((end - start) * fraction);
     }
 
+    private TextView mediaButton(String label, String description) {
+        TextView button = new TextView(this);
+        button.setText(label);
+        button.setTextColor(Color.WHITE);
+        button.setTextSize(17);
+        button.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        button.setGravity(Gravity.CENTER);
+        button.setContentDescription(description);
+        GradientDrawable shape = new GradientDrawable();
+        shape.setColor(Color.argb(34, 255, 255, 255));
+        shape.setCornerRadius(dp(20));
+        button.setBackground(shape);
+        button.setClickable(true);
+        button.setFocusable(true);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(40), dp(40));
+        lp.setMargins(dp(3), 0, dp(3), 0);
+        button.setLayoutParams(lp);
+        return button;
+    }
+
+    private void controlMedia(long action) {
+        MediaController controller = activeMediaController;
+        PlaybackState state = controller == null ? null : controller.getPlaybackState();
+        if (controller == null || state == null || (state.getActions() & action) == 0) return;
+        try {
+            if (action == PlaybackState.ACTION_SKIP_TO_PREVIOUS) controller.getTransportControls().skipToPrevious();
+            else if (action == PlaybackState.ACTION_SKIP_TO_NEXT) controller.getTransportControls().skipToNext();
+        } catch (RuntimeException ignored) { }
+        handler.postDelayed(mediaPoll, 180L);
+    }
+
+    private void toggleMediaPlayback() {
+        MediaController controller = activeMediaController;
+        PlaybackState state = controller == null ? null : controller.getPlaybackState();
+        if (controller == null || state == null) return;
+        try {
+            if (state.getState() == PlaybackState.STATE_PLAYING) controller.getTransportControls().pause();
+            else controller.getTransportControls().play();
+        } catch (RuntimeException ignored) { }
+        handler.postDelayed(mediaPoll, 180L);
+    }
+
     private void showMessage(String text, boolean temporary) {
         latestMessage = text == null ? "" : text.trim();
         updateIsland();
@@ -276,7 +351,11 @@ public final class IslandListenerService extends NotificationListenerService {
         CharSequence title = notification.extras.getCharSequence(Notification.EXTRA_TITLE);
         CharSequence text = notification.extras.getCharSequence(Notification.EXTRA_TEXT);
         String combined = join(title, text);
-        timerLabel = title == null || title.toString().trim().isEmpty() ? "Timer" : title.toString().trim();
+        String titleText = title == null ? "" : title.toString().trim();
+        timerLabel = titleText.isEmpty() || parseDurationSeconds(titleText) >= 0
+                ? "Timer" : titleText;
+        boolean sameTimer = sbn.getKey() != null && sbn.getKey().equals(activeTimerKey);
+        long previousEndElapsed = timerEndElapsed;
         activeTimerKey = sbn.getKey();
         timerEndElapsed = -1L;
         timerFallbackSeconds = parseDurationSeconds(combined);
@@ -289,7 +368,8 @@ public final class IslandListenerService extends NotificationListenerService {
             timerEndElapsed = when;
         }
         if (timerEndElapsed < 0 && timerFallbackSeconds >= 0) {
-            timerEndElapsed = nowElapsed + timerFallbackSeconds * 1000L;
+            timerEndElapsed = sameTimer && previousEndElapsed > 0
+                    ? previousEndElapsed : nowElapsed + timerFallbackSeconds * 1000L;
             timerFallbackSeconds = -1L;
         }
         if (timerEndElapsed < 0 && !chronometer && timerFallbackSeconds < 0) return false;
@@ -312,8 +392,12 @@ public final class IslandListenerService extends NotificationListenerService {
         boolean timerWords = words.contains("timer") || words.contains("countdown") || words.contains("time left")
                 || words.contains("remaining") || words.contains("will ring in");
         boolean chronometer = notification.extras.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER, false);
-        return (timerWords && (clockApp || channel.contains("timer") || chronometer))
-                || (clockApp && channel.contains("timer") && chronometer);
+        boolean countDown = notification.extras.getBoolean(Notification.EXTRA_CHRONOMETER_COUNT_DOWN, false);
+        boolean hasDuration = parseDurationSeconds(join(title, text)) >= 0;
+        // Some Nothing/Google Clock builds publish only an ongoing countdown (e.g. "13:48") and no "Timer" label.
+        return (clockApp && (timerWords || channel.contains("timer") || (chronometer && countDown)
+                    || (sbn.isOngoing() && hasDuration)))
+                || (timerWords && (channel.contains("timer") || chronometer));
     }
 
     private long parseDurationSeconds(String value) {
@@ -338,35 +422,88 @@ public final class IslandListenerService extends NotificationListenerService {
                 : String.format(Locale.ROOT, "%d:%02d", minutes, remainder);
     }
 
+    private LiveActivity classifyLiveActivity(StatusBarNotification sbn) {
+        Notification notification = sbn == null ? null : sbn.getNotification();
+        if (notification == null || notification.extras == null) return null;
+        CharSequence title = notification.extras.getCharSequence(Notification.EXTRA_TITLE);
+        CharSequence text = notification.extras.getCharSequence(Notification.EXTRA_TEXT);
+        String detail = join(title, text);
+        String value = ((sbn.getPackageName() == null ? "" : sbn.getPackageName()) + " " + detail + " "
+                + (notification.getChannelId() == null ? "" : notification.getChannelId()))
+                .toLowerCase(Locale.ROOT);
+        if (Notification.CATEGORY_CALL.equals(notification.category) || value.contains("ongoing call")
+                || value.contains("call in progress")) return new LiveActivity("Call  ·  " + detail, MascotView.CALL);
+        if (value.contains("hotspot") || value.contains("tethering")) return new LiveActivity("Hotspot  ·  " + detail, MascotView.HOTSPOT);
+        if (value.contains("screen recording") || value.contains("recording screen")
+                || value.contains("audio recording") || value.contains("recording audio")) {
+            return new LiveActivity("Recording  ·  " + detail, MascotView.RECORDING);
+        }
+        if (value.contains("screencast") || value.contains("screen cast") || value.contains("casting screen")
+                || value.contains("cast screen") || value.contains("screen sharing")) {
+            return new LiveActivity("Casting  ·  " + detail, MascotView.CASTING);
+        }
+        if (value.contains("flashlight") || value.contains("torch is on") || value.contains("torch active")) {
+            return new LiveActivity("Flashlight  ·  " + detail, MascotView.TORCH);
+        }
+        return null;
+    }
+
+    private static final class LiveActivity {
+        final String text;
+        final int mode;
+        LiveActivity(String text, int mode) { this.text = text; this.mode = mode; }
+    }
+
     private void updateIsland() {
         if (message == null || island == null) return;
         message.setText(expanded ? (latestMessage.isEmpty() ? "Nothing Island" : latestMessage) : compactText(latestMessage));
+        if (mediaControls != null) mediaControls.setVisibility(expanded && hasMediaActivity() ? View.VISIBLE : View.GONE);
+        if (playPauseControl != null && activeMediaController != null) {
+            PlaybackState state = activeMediaController.getPlaybackState();
+            playPauseControl.setText(state != null && state.getState() == PlaybackState.STATE_PLAYING ? "Ⅱ" : "▶");
+        }
         if (mascot != null) mascot.setMode(currentMode);
     }
 
     private void refreshMedia() {
         if (island == null) return;
+        if (activeTimerKey != null || !liveActivities.isEmpty()) return;
         if (currentMode == MascotView.DELIVERY || currentMode == MascotView.EXCITED) return;
         try {
             MediaSessionManager manager = (MediaSessionManager) getSystemService(MEDIA_SESSION_SERVICE);
             List<MediaController> controllers = manager.getActiveSessions(new android.content.ComponentName(this, IslandListenerService.class));
+            MediaController selected = null;
             for (MediaController controller : controllers) {
                 PlaybackState state = controller.getPlaybackState();
-                if (state == null || state.getState() != PlaybackState.STATE_PLAYING) continue;
-                MediaMetadata metadata = controller.getMetadata();
-                CharSequence title = metadata == null ? null : metadata.getDescription().getTitle();
-                CharSequence artist = metadata == null ? null : metadata.getDescription().getSubtitle();
-                String song = title == null ? "Enjoying the music" : title.toString();
-                if (artist != null && !artist.toString().trim().isEmpty()) song += "  ·  " + artist;
-                currentMode = MascotView.SINGING;
-                latestMessage = "♪  " + song;
-                updateIsland();
-                return;
+                if (state == null) continue;
+                if (selected == null) selected = controller;
+                if (state.getState() == PlaybackState.STATE_PLAYING) { selected = controller; break; }
             }
-            if (currentMode == MascotView.SINGING) showEvent("Nothing Island", MascotView.IDLE, false);
+            activeMediaController = selected;
+            if (selected != null) {
+                PlaybackState state = selected.getPlaybackState();
+                MediaMetadata metadata = selected.getMetadata();
+                CharSequence title = metadata == null || metadata.getDescription() == null ? null : metadata.getDescription().getTitle();
+                CharSequence artist = metadata == null || metadata.getDescription() == null ? null : metadata.getDescription().getSubtitle();
+                String song = title == null ? "Media controls" : title.toString();
+                if (artist != null && !artist.toString().trim().isEmpty()) song += "  ·  " + artist;
+                boolean playing = state != null && state.getState() == PlaybackState.STATE_PLAYING;
+                currentMode = playing ? MascotView.SINGING : MascotView.PAUSED;
+                latestMessage = (playing ? "♪  " : "♫  Paused · ") + song;
+                if (mediaControls != null) mediaControls.setVisibility(expanded && hasMediaActivity() ? View.VISIBLE : View.GONE);
+                updateIsland();
+            } else {
+                activeMediaController = null;
+                if (mediaControls != null) mediaControls.setVisibility(View.GONE);
+                if (currentMode == MascotView.SINGING || currentMode == MascotView.PAUSED) showEvent("Nothing Island", MascotView.IDLE, false);
+            }
         } catch (SecurityException ignored) {
             // Notification access can be revoked while the service is alive.
         }
+    }
+
+    private boolean hasMediaActivity() {
+        return activeMediaController != null && (currentMode == MascotView.SINGING || currentMode == MascotView.PAUSED);
     }
 
     private boolean looksLikeDelivery(String packageName, String content) {
@@ -390,6 +527,16 @@ public final class IslandListenerService extends NotificationListenerService {
     @Override public void onNotificationPosted(StatusBarNotification sbn) {
         super.onNotificationPosted(sbn);
         if (updateTimerFromNotification(sbn)) return;
+        // Keep an active countdown pinned while unrelated notifications arrive.
+        if (activeTimerKey != null) return;
+        LiveActivity activity = classifyLiveActivity(sbn);
+        if (activity != null && sbn.isOngoing()) {
+            liveActivities.put(sbn.getKey(), activity);
+            if (!expanded) setExpanded(true);
+            showEvent(activity.text, activity.mode, false);
+            return;
+        }
+        if (!liveActivities.isEmpty()) return;
         KeyguardManager keyguard = (KeyguardManager) getSystemService(KEYGUARD_SERVICE);
         if (keyguard != null && keyguard.isKeyguardLocked()) {
             showEvent("New notification", MascotView.EXCITED, true);
@@ -416,13 +563,32 @@ public final class IslandListenerService extends NotificationListenerService {
 
     @Override public void onNotificationRemoved(StatusBarNotification sbn) {
         super.onNotificationRemoved(sbn);
+        if (sbn != null && sbn.getKey() != null) {
+            LiveActivity removedActivity = liveActivities.remove(sbn.getKey());
+            if (removedActivity != null && currentMode == removedActivity.mode && activeTimerKey == null) {
+                LiveActivity next = null;
+                for (LiveActivity item : liveActivities.values()) next = item;
+                if (next == null) {
+                    showEvent("Nothing Island", MascotView.IDLE, false);
+                    if (expanded) setExpanded(false);
+                } else {
+                    showEvent(next.text, next.mode, false);
+                }
+            }
+        }
         if (sbn != null && sbn.getKey() != null && sbn.getKey().equals(activeTimerKey)) {
             activeTimerKey = null;
             timerEndElapsed = -1L;
             timerFallbackSeconds = -1L;
             handler.removeCallbacks(timerTick);
-            showEvent("Nothing Island", MascotView.IDLE, false);
-            if (expanded) setExpanded(false);
+            LiveActivity next = null;
+            for (LiveActivity item : liveActivities.values()) next = item;
+            if (next != null) {
+                showEvent(next.text, next.mode, false);
+            } else {
+                showEvent("Nothing Island", MascotView.IDLE, false);
+                if (expanded) setExpanded(false);
+            }
         }
     }
 
@@ -462,7 +628,11 @@ public final class IslandListenerService extends NotificationListenerService {
         }
         island = null;
         message = null;
+        mediaControls = null;
+        playPauseControl = null;
         mascot = null;
+        activeMediaController = null;
+        liveActivities.clear();
         params = null;
         expanded = false;
     }
