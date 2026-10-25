@@ -3,18 +3,16 @@ package com.codex.nothingisland;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
 import android.os.SystemClock;
+import android.animation.ValueAnimator;
+import android.view.Choreographer;
 import android.view.View;
-import java.io.IOException;
-import java.io.InputStream;
 
-/** Animated Pokémon companions and a photoreal image-sequence Cocker Spaniel. */
-final class MascotView extends View {
+/** Animated Pokémon companions and a continuously drawn Cocker Spaniel rig. */
+final class MascotView extends View implements Choreographer.FrameCallback, CockerSpanielRig.Listener {
     static final int IDLE = 0;
     static final int SINGING = 1;
     static final int DELIVERY = 2;
@@ -34,71 +32,162 @@ final class MascotView extends View {
     static final int DOG_BARK = 3;
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final CockerSpanielRig dogRig = new CockerSpanielRig();
+    private final Choreographer choreographer = Choreographer.getInstance();
+    private final RectF reusedRect = new RectF();
+    private final Path leftPath = new Path();
+    private final Path rightPath = new Path();
     private int mode = IDLE;
     private int variant;
-    private int dogBehavior = DOG_IDLE;
-    private Bitmap spanielIdle;
-    private Bitmap spanielSleep;
-    private Bitmap spanielBark;
-    private final Bitmap[] spanielRun = new Bitmap[4];
-    private boolean spanielFramesLoaded;
+    private CockerSpanielRig.Listener motionListener;
+    private boolean frameLoopActive = true;
+    private boolean frameScheduled;
+    private boolean attached;
+    private boolean batterySaver;
+    private boolean dogRoamRequested = true;
+    private boolean reducedMotion;
+    private long lastFrameNanos;
+    private long lastDogAnnouncementMs;
 
     MascotView(Context context) {
         super(context);
+        dogRig.setListener(this);
+        setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         setContentDescription(variantName(variant) + " mascot. Tap to open the activity card.");
     }
 
-    private void loadSpanielFrames() {
-        if (spanielFramesLoaded) return;
-        spanielFramesLoaded = true;
-        Context context = getContext();
-        spanielIdle = loadFrame(context, "spaniel/idle.png");
-        spanielSleep = loadFrame(context, "spaniel/sleep.png");
-        spanielBark = loadFrame(context, "spaniel/bark.png");
-        for (int i = 0; i < spanielRun.length; i++) {
-            spanielRun[i] = loadFrame(context, "spaniel/run_" + i + ".png");
+    void setDogMotionListener(CockerSpanielRig.Listener listener) {
+        motionListener = listener;
+    }
+
+    void setFrameLoopActive(boolean active) {
+        frameLoopActive = active;
+        if (active) scheduleFrame();
+        else unscheduleFrame();
+    }
+
+    void setBatterySaver(boolean enabled) {
+        batterySaver = enabled;
+        dogRig.setRoamEnabled(dogRoamRequested && !batterySaver && !reducedMotion);
+    }
+
+    void setDogRoamEnabled(boolean enabled) {
+        dogRoamRequested = enabled;
+        dogRig.setRoamEnabled(dogRoamRequested && !batterySaver && !reducedMotion);
+    }
+
+    void setDogRoamRange(float rangeDp) {
+        dogRig.setRoamRange(rangeDp);
+    }
+
+    void barkFromTap() {
+        dogRig.bark();
+        if (isAccessibilityFocused() || hasFocus()) {
+            announceForAccessibility("Dog barking");
+            lastDogAnnouncementMs = SystemClock.uptimeMillis();
+        }
+        scheduleFrame();
+        invalidate();
+    }
+
+    @Override protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        attached = true;
+        scheduleFrame();
+    }
+
+    @Override protected void onDetachedFromWindow() {
+        attached = false;
+        unscheduleFrame();
+        super.onDetachedFromWindow();
+    }
+
+    @Override protected void onVisibilityChanged(View changedView, int visibility) {
+        super.onVisibilityChanged(changedView, visibility);
+        if (visibility == View.VISIBLE) scheduleFrame();
+        else if (changedView == this) unscheduleFrame();
+    }
+
+    @Override public void doFrame(long frameTimeNanos) {
+        frameScheduled = false;
+        if (!attached || !frameLoopActive || !isShown()) return;
+        float dt = lastFrameNanos == 0L ? 0f : (frameTimeNanos - lastFrameNanos) * 1e-9f;
+        lastFrameNanos = frameTimeNanos;
+        if (dt > .05f) dt = .05f;
+        boolean animationsEnabled = ValueAnimator.areAnimatorsEnabled();
+        if (reducedMotion == animationsEnabled) {
+            reducedMotion = !animationsEnabled;
+            dogRig.setReducedMotion(reducedMotion);
+            dogRig.setRoamEnabled(dogRoamRequested && !batterySaver && !reducedMotion);
+        }
+        if (variant == 3) {
+            dogRig.update(dt, animationsEnabled);
+            invalidate();
+        }
+        else if (dt > 0f) invalidate();
+        scheduleFrame();
+    }
+
+    private void scheduleFrame() {
+        if (attached && frameLoopActive && !frameScheduled && isShown()) {
+            long delayMs = !ValueAnimator.areAnimatorsEnabled() && (variant != 3 || !dogRig.isBarking())
+                    ? 400L : batterySaver && variant == 3 && !dogRig.isRoaming() ? 100L : 0L;
+            frameScheduled = true;
+            choreographer.postFrameCallbackDelayed(this, delayMs);
         }
     }
 
-    private Bitmap loadFrame(Context context, String file) {
-        try (InputStream input = context.getAssets().open(file)) {
-            return BitmapFactory.decodeStream(input);
-        } catch (IOException ignored) {
-            return null;
+    private void unscheduleFrame() {
+        if (frameScheduled) choreographer.removeFrameCallback(this);
+        frameScheduled = false;
+        lastFrameNanos = 0L;
+    }
+
+    @Override public void onPosition(float progress) {
+        if (motionListener != null) motionListener.onPosition(progress);
+    }
+
+    @Override public void onStateChanged(int state, boolean barking) {
+        if (variant != 3) return;
+        String label = barking ? "Dog barking" : state == CockerSpanielRig.SLEEP || state == CockerSpanielRig.CURL
+                ? "Dog sleeping" : state == CockerSpanielRig.WALK || state == CockerSpanielRig.SLOW || state == CockerSpanielRig.WAKE
+                ? "Dog walking" : "Dog resting";
+        setContentDescription(label);
+        long now = SystemClock.uptimeMillis();
+        if ((isAccessibilityFocused() || hasFocus()) && now - lastDogAnnouncementMs >= 8000L) {
+            announceForAccessibility(label);
+            lastDogAnnouncementMs = now;
         }
+        if (motionListener != null) motionListener.onStateChanged(state, barking);
     }
 
     void setMode(int next) {
         if (mode != next) {
             mode = next;
             if (variant == 3) {
-                if (next == DELIVERY) setDogBehavior(DOG_RUN);
-                else if (next == BOOKING || next == EXCITED) setDogBehavior(DOG_BARK);
-                else if (next == SINGING) setDogBehavior(DOG_RUN);
-                else if (next == PAUSED) setDogBehavior(DOG_SLEEP);
-                else setDogBehavior(DOG_IDLE);
+                if (next == BOOKING || next == EXCITED) dogRig.bark();
             }
             invalidate();
+            scheduleFrame();
         }
     }
 
     void setDogBehavior(int next) {
-        if (dogBehavior != next) {
-            dogBehavior = next;
-            invalidate();
-        }
+        if (next == DOG_BARK) dogRig.bark();
+        scheduleFrame();
+        invalidate();
     }
 
     void setVariant(int next) {
         int normalized = Math.max(0, Math.min(3, next));
-        if (normalized == 3) loadSpanielFrames();
         if (variant != normalized) {
             variant = normalized;
-            dogBehavior = DOG_IDLE;
+            if (normalized == 3) dogRig.setReducedMotion(reducedMotion);
             setContentDescription(variant == 3
-                    ? "English Cocker Spaniel. Tap to bark and open the activity card."
+                    ? "Dog walking. Tap to bark and open the activity card."
                     : variantName(variant) + " mascot. Tap to open the activity card.");
             invalidate();
+            scheduleFrame();
         }
     }
 
@@ -133,7 +222,7 @@ final class MascotView extends View {
         float density = getResources().getDisplayMetrics().density;
         float visualSize = size >= 80f * density
                 ? Math.min(size, 96f * density)
-                : Math.min(size, 28f * density);
+                : Math.min(size, 36f * density);
         float scale = visualSize / 112f;
         canvas.save();
         canvas.translate(getWidth() / 2f, getHeight() / 2f);
@@ -143,11 +232,12 @@ final class MascotView extends View {
         float bob = (mode == SINGING || mode == EXCITED || mode == DELIVERY || mode == BOOKING)
                 ? (float) Math.sin(time * Math.PI * 4) * 3.2f
                 : (float) Math.sin(time * Math.PI * 2) * 1.5f;
+        if (variant == 3 && reducedMotion) bob = 0f;
         canvas.translate(0f, bob);
 
         if (mode == DELIVERY) drawScooter(canvas, time);
         if (variant == 3) {
-            drawSpaniel(canvas, time);
+            dogRig.draw(canvas, time);
         } else {
             drawBack(canvas, time);
             drawEars(canvas);
@@ -167,56 +257,20 @@ final class MascotView extends View {
         else if (mode == BOOKING) drawTicketIcon(canvas, time);
 
         canvas.restore();
-        postInvalidateDelayed(mode == IDLE ? 50 : 16);
-    }
-
-    private void drawSpaniel(Canvas canvas, float time) {
-        long now = SystemClock.uptimeMillis();
-        Bitmap frame;
-        float bob = 0f;
-        float breath = 1f;
-        if (dogBehavior == DOG_SLEEP) {
-            frame = spanielSleep;
-            breath = 1f + (float) Math.sin(time * Math.PI * 2f) * .018f;
-        } else if (dogBehavior == DOG_RUN) {
-            frame = spanielRun[(int) ((now / 105L) % spanielRun.length)];
-            bob = (float) Math.sin(time * Math.PI * 16f) * 1.3f;
-        } else if (dogBehavior == DOG_BARK) {
-            frame = ((now / 300L) % 2L == 0L) ? spanielBark : spanielIdle;
-            bob = (float) Math.sin(time * Math.PI * 8f) * .7f;
-        } else {
-            frame = spanielIdle;
-            bob = (float) Math.sin(time * Math.PI * 2f) * .5f;
-        }
-        if (frame == null) return;
-        canvas.save();
-        canvas.translate(0f, bob);
-        canvas.scale(1f, breath, 0f, 18f);
-        RectF target = new RectF(-56f, -56f, 56f, 56f);
-        canvas.drawBitmap(frame, null, target, paint);
-        canvas.restore();
-        if (dogBehavior == DOG_SLEEP) {
-            paint.setColor(Color.rgb(220, 240, 255));
-            paint.setTextSize(12f);
-            paint.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-            float drift = (time * 9f) % 7f;
-            canvas.drawText("Z", 29f + drift, -31f - drift, paint);
-            canvas.drawText("z", 39f + drift, -38f - drift, paint);
-        }
     }
 
     private void drawEars(Canvas c) {
         paint.setColor(bodyColor());
         paint.setStyle(Paint.Style.FILL);
-        Path left = new Path();
-        Path right = new Path();
+        Path left = leftPath; left.rewind();
+        Path right = rightPath; right.rewind();
         if (variant == 0) {
             left.moveTo(-22, -22); left.lineTo(-34, -55); left.quadTo(-15, -47, -10, -27); left.close();
             right.moveTo(19, -25); right.lineTo(34, -55); right.quadTo(35, -30, 14, -21); right.close();
             c.drawPath(left, paint); c.drawPath(right, paint);
             paint.setColor(Color.rgb(45, 41, 38));
-            Path tip = new Path(); tip.moveTo(-34, -55); tip.lineTo(-25, -44); tip.lineTo(-30, -41); tip.close(); c.drawPath(tip, paint);
-            tip.reset(); tip.moveTo(34, -55); tip.lineTo(29, -43); tip.lineTo(24, -46); tip.close(); c.drawPath(tip, paint);
+            left.rewind(); left.moveTo(-34, -55); left.lineTo(-25, -44); left.lineTo(-30, -41); left.close(); c.drawPath(left, paint);
+            left.rewind(); left.moveTo(34, -55); left.lineTo(29, -43); left.lineTo(24, -46); left.close(); c.drawPath(left, paint);
         } else if (variant == 1) {
             left.moveTo(-26, -24); left.quadTo(-43, -43, -46, -32); left.quadTo(-43, -18, -25, -16); left.close();
             right.moveTo(26, -24); right.quadTo(43, -43, 46, -32); right.quadTo(43, -18, 25, -16); right.close();
@@ -233,52 +287,52 @@ final class MascotView extends View {
     private void drawBody(Canvas c) {
         if (variant == 1) {
             paint.setColor(Color.rgb(128, 82, 56));
-            c.drawOval(new RectF(-34, -10, 35, 37), paint);
+            drawOval(c, -34, -10, 35, 37, paint);
             paint.setColor(Color.rgb(223, 177, 116));
-            c.drawOval(new RectF(-28, -7, 29, 31), paint);
+            drawOval(c, -28, -7, 29, 31, paint);
             paint.setColor(Color.rgb(124, 81, 55));
             paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(2.6f);
-            c.drawArc(new RectF(-24, -4, 24, 27), 205, 130, false, paint);
+            drawArc(c, -24, -4, 24, 27, 205, 130, false, paint);
             c.drawLine(0, -2, 0, 26, paint);
             paint.setStyle(Paint.Style.FILL);
         } else if (variant == 2) {
             paint.setColor(bodyColor());
-            c.drawOval(new RectF(-36, -23, 35, 32), paint);
+            drawOval(c, -36, -23, 35, 32, paint);
             paint.setColor(Color.rgb(47, 125, 105));
-            c.drawOval(new RectF(-27, -16, -16, -5), paint);
-            c.drawOval(new RectF(13, -12, 25, -2), paint);
-            c.drawOval(new RectF(-5, 13, 7, 23), paint);
+            drawOval(c, -27, -16, -16, -5, paint);
+            drawOval(c, 13, -12, 25, -2, paint);
+            drawOval(c, -5, 13, 7, 23, paint);
         } else {
             paint.setColor(bodyColor());
-            c.drawOval(new RectF(-31, -28, 31, 36), paint);
+            drawOval(c, -31, -28, 31, 36, paint);
             paint.setColor(lightColor());
-            c.drawOval(new RectF(-20, 10, 20, 34), paint);
+            drawOval(c, -20, 10, 20, 34, paint);
             paint.setColor(Color.rgb(231, 66, 72));
             c.drawCircle(-28, 13, 7, paint); c.drawCircle(28, 13, 7, paint);
         }
 
         if (variant == 1) {
             paint.setColor(bodyColor());
-            c.drawOval(new RectF(-30, -42, 30, 9), paint);
+            drawOval(c, -30, -42, 30, 9, paint);
             paint.setColor(lightColor());
-            c.drawOval(new RectF(-25, -35, 25, -2), paint);
+            drawOval(c, -25, -35, 25, -2, paint);
         } else if (variant == 2) {
             paint.setColor(bodyColor());
-            c.drawOval(new RectF(-27, -43, 27, 4), paint);
+            drawOval(c, -27, -43, 27, 4, paint);
             paint.setColor(Color.rgb(48, 133, 100));
-            c.drawOval(new RectF(-18, -36, 18, -5), paint);
+            drawOval(c, -18, -36, 18, -5, paint);
         }
         // Tiny feet ground the silhouettes when the card is expanded.
         paint.setColor(bodyColor());
         paint.setStyle(Paint.Style.FILL);
-        c.drawOval(new RectF(-25, 27, -8, 39), paint);
-        c.drawOval(new RectF(8, 27, 25, 39), paint);
+        drawOval(c, -25, 27, -8, 39, paint);
+        drawOval(c, 8, 27, 25, 39, paint);
     }
 
     private void drawBack(Canvas c, float time) {
         if (variant == 0) {
             c.save(); c.rotate((float) Math.sin(time * Math.PI * 2) * 7f, 27, 8);
-            Path tail = new Path();
+            Path tail = leftPath; tail.rewind();
             tail.moveTo(25, 8); tail.lineTo(38, 1); tail.lineTo(31, -7); tail.lineTo(47, -12);
             tail.lineTo(40, -20); tail.lineTo(54, -29); tail.lineTo(46, -32); tail.lineTo(53, -45);
             paint.setColor(Color.rgb(183, 131, 48)); paint.setStrokeWidth(9); paint.setStrokeJoin(Paint.Join.ROUND);
@@ -287,9 +341,9 @@ final class MascotView extends View {
             paint.setStyle(Paint.Style.FILL); c.restore();
         } else if (variant == 1) {
             paint.setColor(Color.rgb(130, 82, 56));
-            c.drawOval(new RectF(-34, -17, 35, 33), paint);
+            drawOval(c, -34, -17, 35, 33, paint);
             paint.setColor(Color.rgb(214, 165, 101));
-            c.drawOval(new RectF(-27, -13, 28, 27), paint);
+            drawOval(c, -27, -13, 28, 27, paint);
         } else {
             paint.setColor(Color.rgb(58, 144, 105));
             c.drawCircle(0, -34, 23, paint);
@@ -308,21 +362,21 @@ final class MascotView extends View {
             c.drawLine(10, 5, 17, 5, paint);
             paint.setStyle(Paint.Style.FILL);
         } else {
-            c.drawOval(new RectF(-18, -2, -10, 11), paint);
-            c.drawOval(new RectF(10, -2, 18, 11), paint);
+            drawOval(c, -18, -2, -10, 11, paint);
+            drawOval(c, 10, -2, 18, 11, paint);
             paint.setColor(Color.WHITE);
             c.drawCircle(-12, 2, 2, paint);
             c.drawCircle(16, 2, 2, paint);
         }
         paint.setColor(Color.rgb(67, 38, 42));
         if (mode == SINGING && time < .56f) {
-            c.drawOval(new RectF(-5, 14, 6, 25), paint);
+            drawOval(c, -5, 14, 6, 25, paint);
             paint.setColor(Color.rgb(255, 155, 157));
-            c.drawOval(new RectF(-2, 20, 3, 24), paint);
+            drawOval(c, -2, 20, 3, 24, paint);
         } else {
             paint.setStrokeWidth(2.2f);
             paint.setStyle(Paint.Style.STROKE);
-            c.drawArc(new RectF(-5, 13, 6, 24), 20, 140, false, paint);
+            drawArc(c, -5, 13, 6, 24, 20, 140, false, paint);
             paint.setStyle(Paint.Style.FILL);
         }
     }
@@ -331,7 +385,7 @@ final class MascotView extends View {
         c.save();
         c.rotate((float) Math.sin(time * Math.PI * 2) * 7f, 0, -49);
         paint.setColor(Color.rgb(43, 145, 92));
-        Path leaf = new Path();
+        Path leaf = leftPath; leaf.rewind();
         leaf.moveTo(0, -50); leaf.quadTo(-10, -70, -26, -62); leaf.quadTo(-21, -47, 0, -50); leaf.close(); c.drawPath(leaf, paint);
         leaf.reset(); leaf.moveTo(0, -50); leaf.quadTo(10, -71, 27, -63); leaf.quadTo(21, -47, 0, -50); leaf.close(); c.drawPath(leaf, paint);
         paint.setColor(Color.rgb(170, 220, 111));
@@ -380,8 +434,8 @@ final class MascotView extends View {
         paint.setStrokeWidth(3f);
         paint.setStrokeCap(Paint.Cap.ROUND);
         float pulse = (float) Math.sin(time * Math.PI * 2) * 2f;
-        c.drawArc(new RectF(22 - pulse, -42 - pulse, 48 + pulse, -16 + pulse), 215, 110, false, paint);
-        c.drawArc(new RectF(26, -36, 44, -18), 215, 110, false, paint);
+        drawArc(c, 22 - pulse, -42 - pulse, 48 + pulse, -16 + pulse, 215, 110, false, paint);
+        drawArc(c, 26, -36, 44, -18, 215, 110, false, paint);
         paint.setStyle(Paint.Style.FILL);
         c.drawCircle(35, -16, 3, paint);
     }
@@ -399,8 +453,8 @@ final class MascotView extends View {
         paint.setStyle(Paint.Style.STROKE);
         paint.setStrokeWidth(3f);
         float shift = (time * 10) % 4;
-        c.drawArc(new RectF(20 - shift, -37 - shift, 48 + shift, -9 + shift), 230, 80, false, paint);
-        c.drawArc(new RectF(25 - shift, -32 - shift, 43 + shift, -14 + shift), 230, 80, false, paint);
+        drawArc(c, 20 - shift, -37 - shift, 48 + shift, -9 + shift, 230, 80, false, paint);
+        drawArc(c, 25 - shift, -32 - shift, 43 + shift, -14 + shift, 230, 80, false, paint);
         paint.setStyle(Paint.Style.FILL);
         c.drawCircle(25, -14, 3, paint);
     }
@@ -425,7 +479,8 @@ final class MascotView extends View {
         paint.setStrokeWidth(3f);
         paint.setStrokeCap(Paint.Cap.ROUND);
         float lift = (float) Math.sin(time * Math.PI * 2) * 2f;
-        c.drawRoundRect(new RectF(23, -34 + lift, 46, -13 + lift), 4, 4, paint);
+        reusedRect.set(23, -34 + lift, 46, -13 + lift);
+        c.drawRoundRect(reusedRect, 4, 4, paint);
         c.drawLine(28, -27 + lift, 41, -27 + lift, paint);
         c.drawLine(28, -21 + lift, 37, -21 + lift, paint);
         paint.setStyle(Paint.Style.FILL);
@@ -447,5 +502,16 @@ final class MascotView extends View {
         paint.setColor(Color.rgb(24, 24, 24));
         c.drawCircle(-16 + roll, 40, 2.7f, paint);
         c.drawCircle(23 + roll, 40, 2.7f, paint);
+    }
+
+    private void drawOval(Canvas canvas, float left, float top, float right, float bottom, Paint brush) {
+        reusedRect.set(left, top, right, bottom);
+        canvas.drawOval(reusedRect, brush);
+    }
+
+    private void drawArc(Canvas canvas, float left, float top, float right, float bottom,
+                         float start, float sweep, boolean useCenter, Paint brush) {
+        reusedRect.set(left, top, right, bottom);
+        canvas.drawArc(reusedRect, start, sweep, useCenter, brush);
     }
 }

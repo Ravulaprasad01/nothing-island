@@ -1,33 +1,36 @@
-# nothing-island
+# Nothing Island
 
-An animated companion for the Nothing Phone (2a), inspired by Dynamic Island and OnePlus Fluid Cloud. The compact mascot sits in the status-bar slot beside the clock (the position marked in the setup reference) with no visible background; tap it to expand the activity card.
+A lightweight Android overlay for the Nothing Phone (2a), inspired by OnePlus Fluid Cloud and Dynamic Island interactions. A transparent 48 dp touch target is positioned beside the centered punch-hole camera, on its right side toward the network indicators. The English Cocker Spaniel is drawn as a continuously animated Canvas rig, not a photo or a sequence of still images.
 
-## Download the APK
+## Download
 
-[Download Nothing-Island-debug.apk](Nothing-Island-debug.apk) from this repository. On GitHub, open the file and choose **Download raw file** (or **View raw**) to save it to your phone.
+Download [Nothing-Island-release.apk](dist/Nothing-Island-release.apk) from the `dist` folder in this repository. Open the file on GitHub and choose **Download raw file** (or **View raw**) to save it to your phone.
 
-**SHA-256:** `5B0BFFBA11EDD6B1A405D6CCE8280EC67E3E8BE259200AFE2E513F57A44F5F69`
+This direct-download APK is signed with the local Android debug key. It is suitable for sideloading and testing, but it is not signed for Google Play publication. Android or Play Protect can show a sideloading warning; keep Play Protect enabled and install only a build you trust. [Google Play Protect guidance](https://support.google.com/android/answer/2812853?hl=en)
 
-This is a debug APK built from this source. It is for direct installation and testing, not a Play Store release. Google Play Protect may scan or warn about a sideloaded APK; this project cannot promise Play Protect or Google Play approval. Keep Play Protect enabled and only install the APK you downloaded from this repository. [Google Play Protect guidance](https://support.google.com/android/answer/2812853?hl=en)
+Version `1.2.0` · `minSdk 29` · `targetSdk 36` · 82,084 bytes
+
+SHA-256: `37271A72A9A6386B327C1CDD1807D76E75255747028D2BBF0147D39341D49CE2`
 
 ## Install on a Nothing Phone (2a)
 
-1. On the phone, open this repository and download `Nothing-Island-debug.apk` using the link above.
-2. Open the phone's **Downloads** app or the browser's download list, then tap the APK.
-3. If Android asks, allow your browser or file manager to **Install unknown apps**. This is a per-source setting; allow the app you used to open the APK, then return to the installer.
-4. Review Android's installer and Play Protect messages. If Android blocks the installation, do not turn off Play Protect globally. The debug APK is not Play Store-reviewed, so a warning or block is possible.
-5. After installation, open **Nothing Island**.
-6. Read the in-app disclosure. Check the notification-access consent box and tap **Enable notification access**. Android Settings opens; select **Nothing Island** and allow notification access. Return to the app.
-7. Check the separate overlay consent box and tap **Allow display over other apps**. In Android Settings, allow Nothing Island to display over other apps. Return to the app.
-8. Tap **Enable / refresh island**. A small mascot appears beside the status-bar clock, at the hourglass/timer position shown in the reference. Tap it to expand or collapse the card.
+1. Download `Nothing-Island-release.apk` to the phone from the link above.
+2. Open **Settings → Apps → Special app access → Install unknown apps**. Choose the browser or file manager you will use and enable **Allow from this source**. This permission applies only to that installer source.
+3. Open the downloaded APK from Downloads, review Android's installer, and tap **Install**. Keep Play Protect enabled. If it blocks installation, do not disable it globally.
+4. Open **Nothing Island** and read the disclosure. Select the notification-access consent checkbox, then tap **Enable notification access**. Android Settings opens: choose Nothing Island and allow notification access. This lets the app read notification text and active media metadata to show cards and music controls.
+5. Return to the app, select the separate overlay consent checkbox, and tap **Allow display over other apps**. In Android Settings, allow Nothing Island to display over other apps. This is required to draw the transparent mascot above other apps.
+6. Return and tap **Enable / refresh island**. The mascot appears beside the camera cutout. Tap it to bark and open the activity card. With the card open, tap the dog again to bark without closing the card.
+7. Optional: for better background reliability, open **Settings → Apps → Nothing Island → App battery usage** and allow background activity/choose **Unrestricted**. Nothing OS menus differ by version. If **Settings → Apps → Auto launch** or a similar autostart control is available, allow Nothing Island there.
+
+**ADB install/update:** enable USB debugging and connect the phone, then run `adb install -r dist/Nothing-Island-release.apk`. Wireless debugging also works after pairing the device with ADB.
 
 To update an earlier installation, download and open the new APK. Android should offer **Update**. If it reports a signature conflict, uninstall the older build first, then install the new APK; uninstalling clears that app's local settings.
 
-The app cannot show the island until both notification access and display-over-other-apps access are granted. The app itself does not grant these permissions; Android asks you to confirm each one in Settings. You can revoke either permission there whenever you want.
+Notification cards and media integration require notification access. The floating island itself requires display-over-other-apps access. Both are optional special access settings, granted by you in Android Settings and revocable at any time. The dog animation works without notification access once the overlay is enabled.
 
 ## What it does
 
-- **Companions:** Choose Pikachu, Squirtle, Bulbasaur, or an English Cocker Spaniel. The dog uses transparent, photo-real image frames rather than vector shapes, with a four-frame gallop, a breathing sleep pose, and alternating open-mouth bark frames. It roams across a short, camera-adjacent section of the status bar, then rests and barks on its own. Tap the dog to make it bark and open the activity card; tap the expanded dog again to bark while the card stays open. Barking is visual only and plays no audio. Pokémon drawings react to media, delivery, timers, and other live activities. The picker and previews appear after you tap **Choose mascot style**.
+- **Companions:** Choose Pikachu, Squirtle, Bulbasaur, or an English Cocker Spaniel. The dog is drawn from articulated body, legs, head, jaw, ears, and tail shapes with delta-time animation, blended walk/idle/sit/curl/sleep/wake states, blinking, breathing, and a visual-only bark. It roams in the safe status-bar area beside the camera cutout. Tap it to bark and open the activity card; tapping it again while expanded barks without closing the card. No bark audio is played. Pokémon drawings react to media, delivery, timers, and other live activities.
 - **Tap to expand:** The small background-free mascot sits in the accessible top-bar touch area, lowered slightly beside the clock. Tapping expands it into a translucent activity card with an eased 360 ms transition. Android screen readers can read the companion's name and card state; media controls have individual labels. The app does not force spoken announcements.
 - **Music:** The expanded mini player shows available album artwork, track/artist, playback progress, and previous, play/pause, next, and seek controls. Tap the artwork to open the player's own app. The controls work when the active media session supports those actions.
 - **Delivery alerts:** Matching order and delivery notification text triggers a scooter animation. This is a visual reaction to notification text, not live order tracking; some apps or wording may not be recognized.
@@ -52,14 +55,40 @@ Nothing Island uses Android's notification-listener access to read notification 
 - Music animation follows Android media-session playback state, not the audio waveform.
 - Delivery detection relies on simple notification text and known app names; it may miss orders or misclassify messages.
 - Timer detection relies on the Clock app publishing its active timer as a notification. Clock implementations that hide the timer from notifications cannot be detected by a third-party listener.
-- The debug APK may produce a Play Protect warning because it is sideloaded and not Play Store-reviewed.
+- This sideloaded APK may produce a Play Protect warning because it is not Play Store-reviewed.
+
+## Troubleshooting
+
+- **Mascot is missing:** confirm display-over-other-apps is allowed, then reopen the app and tap **Enable / refresh island**. Notification access is needed for activity cards, but not for the mascot itself.
+- **Mascot is not beside the punch-hole:** restart the overlay after changing display size, font size, orientation, or screen resolution. The position uses Android's reported display cutout bounds and a safe gap; unusual ROM layouts can report those bounds differently.
+- **Animation stutters:** close heavy apps, turn off Battery Saver, and check Android's **Remove animations** setting. Battery Saver intentionally pauses roaming and lowers the animation cadence.
+- **Tap does not register:** tap within the transparent 48 dp target around the dog. If another overlay or a cutout/edge gesture is intercepting touches, disable that overlay temporarily and refresh Nothing Island.
+- **Timer or order is not detected:** the source app must publish a readable notification. Timer countdowns hidden by the clock app and orders without matching notification text are not available to third-party apps.
+- **Update reports a signature conflict:** uninstall the older APK and install this one. Builds signed with a different local debug key cannot update each other; uninstalling clears local settings.
+
+## Test checklist
+
+Run these checks on a phone before relying on a build:
+
+- [ ] Tap dog; confirm bark and expanded card.
+- [ ] Tap dog with card open; confirm bark and card stays open.
+- [ ] Tap rapidly during a bark; confirm it restarts without a visual jump.
+- [ ] Rotate/change display size; confirm the dog remains beside the camera and inside safe bounds.
+- [ ] Turn the screen off and on; confirm animation pauses and resumes.
+- [ ] Compare at 60 Hz and 120 Hz; confirm motion speed is similar.
+- [ ] Check light and dark status-bar content for dog contrast.
+- [ ] Check TalkBack labels and polite state announcements.
+- [ ] Enable system **Remove animations**; confirm calm pose and short bark pulse.
+- [ ] Test music controls, notification cards, delivery/bookings, and an active timer.
+
+The repository has no existing unit or instrumentation test source sets. ADB device profiling must be run on the target phone to measure frame times and jank; no device profiling numbers are claimed here.
 
 ## Build from source
 
 Requirements: JDK 17 and Android SDK Platform 36. From this directory, run:
 
 ```powershell
-./gradlew.bat assembleDebug
+./gradlew.bat testDebugUnitTest assembleRelease
 ```
 
-The output is `app/build/outputs/apk/debug/app-debug.apk`.
+The installable APK is copied to `dist/Nothing-Island-release.apk`. It is a release build signed with the local debug key (`versionName 1.2.0`, `minSdk 29`, `targetSdk 36`). The APK is free and contains no ads, subscriptions, or purchases.
