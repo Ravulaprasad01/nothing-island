@@ -1,0 +1,16 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.codex.nothingisland'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'com.codex.nothingisland'
+        minSdk 29
+        targetSdk 36
+        versionCode 1
+        versionName '1.0.0'
+    }
+}
